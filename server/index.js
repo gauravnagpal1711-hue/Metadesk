@@ -12,7 +12,7 @@ import { campaignsRouter } from './routes/campaigns.js';
 import { leadsRouter } from './routes/leads.js';
 import { whatsappRouter } from './routes/whatsapp.js';
 import { facebookRouter, restoreConnection } from './routes/facebook.js';
-import { listCampaigns, listLeadForms, fetchFormLeads, flattenLead, metaConfigured } from './services/meta.js';
+import { listCampaigns, listLeadForms, fetchFormLeads, flattenLead, normalisePhone, metaConfigured } from './services/meta.js';
 import { startWeb } from './services/whatsappWeb.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -64,15 +64,15 @@ async function syncEverything() {
     for (const c of campaigns) {
       await q(
         `INSERT INTO campaigns (id,name,objective,status,effective_status,daily_budget,lifetime_budget,
-                                spend,impressions,clicks,leads_count,ctr,cpl,raw,synced_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
-         ON CONFLICT (id) DO UPDATE SET
-           name=EXCLUDED.name, status=EXCLUDED.status, effective_status=EXCLUDED.effective_status,
-           daily_budget=EXCLUDED.daily_budget, spend=EXCLUDED.spend, impressions=EXCLUDED.impressions,
-           clicks=EXCLUDED.clicks, leads_count=EXCLUDED.leads_count, ctr=EXCLUDED.ctr, cpl=EXCLUDED.cpl,
-           raw=EXCLUDED.raw, synced_at=now()`,
+        spend,impressions,clicks,leads_count,ctr,cpl,raw,synced_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
+        ON CONFLICT (id) DO UPDATE SET
+        name=EXCLUDED.name, status=EXCLUDED.status, effective_status=EXCLUDED.effective_status,
+        daily_budget=EXCLUDED.daily_budget, spend=EXCLUDED.spend, impressions=EXCLUDED.impressions,
+        clicks=EXCLUDED.clicks, leads_count=EXCLUDED.leads_count, ctr=EXCLUDED.ctr, cpl=EXCLUDED.cpl,
+        raw=EXCLUDED.raw, synced_at=now()`,
         [c.id, c.name, c.objective, c.status, c.effective_status, c.daily_budget, c.lifetime_budget,
-         c.spend, c.impressions, c.clicks, c.leads_count, c.ctr, c.cpl, JSON.stringify(c.raw)]
+        c.spend, c.impressions, c.clicks, c.leads_count, c.ctr, c.cpl, JSON.stringify(c.raw)]
       );
     }
   } catch (e) {
@@ -88,15 +88,52 @@ async function syncEverything() {
       for (const raw of leads) {
         const flat = flattenLead(raw);
         const wantsWhatsApp = JSON.stringify(flat.fields).toLowerCase().includes('whatsapp');
+        const normalizedPhone = normalisePhone(flat.phone);
+        
+        // Insert or update the lead as Meta-verified
         await q(
           `INSERT INTO leads (meta_lead_id, form_id, campaign_id, campaign_name, full_name, phone, email, city,
-                              source, wants_whatsapp, stage_id, fields, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'meta',$9,$10,$11,$12)
-           ON CONFLICT (meta_lead_id) DO NOTHING`,
+          source, wants_whatsapp, is_meta_verified, stage_id, fields, created_at)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'meta',$9,true,$10,$11,$12)
+          ON CONFLICT (meta_lead_id) DO UPDATE SET
+            is_meta_verified = true,
+            wants_whatsapp = EXCLUDED.wants_whatsapp,
+            fields = EXCLUDED.fields,
+            updated_at = now()`,
           [raw.id, raw.form_id || form.id, raw.campaign_id || null, raw.campaign_name || form.name,
-           flat.full_name, flat.phone, flat.email, flat.city, wantsWhatsApp,
-           firstStage[0]?.id, JSON.stringify(flat.fields), raw.created_time || new Date()]
+          flat.full_name, normalizedPhone, flat.email, flat.city, wantsWhatsApp,
+          firstStage[0]?.id, JSON.stringify(flat.fields), raw.created_time || new Date()]
         );
+
+        // Upgrade any pending WhatsApp leads with the same phone to Meta-verified
+        const { rows: upgradedLeads } = await q(
+          `UPDATE leads 
+           SET is_meta_verified = true, meta_lead_id = $1, source = 'meta', updated_at = now()
+           WHERE phone = $2 AND source = 'whatsapp' AND is_meta_verified = false
+           RETURNING id`,
+          [raw.id, normalizedPhone]
+        );
+
+        // Attach pending messages to this lead
+        if (upgradedLeads.length > 0) {
+          const leadId = upgradedLeads[0].id;
+          const { rows: pendingMsgs } = await q(
+            `SELECT * FROM pending_messages WHERE phone = $1 ORDER BY created_at ASC`,
+            [normalizedPhone]
+          );
+
+          for (const msg of pendingMsgs) {
+            await q(
+              `INSERT INTO messages (lead_id, direction, channel, body, created_at)
+              VALUES ($1, 'in', $2, $3, $4)`,
+              [leadId, msg.channel, msg.body, msg.created_at]
+            );
+          }
+
+          // Clean up pending messages
+          await q(`DELETE FROM pending_messages WHERE phone = $1`, [normalizedPhone]);
+          console.log(`[Meta Sync] Upgraded pending lead for ${normalizedPhone} - attached ${pendingMsgs.length} queued messages`);
+        }
       }
     }
   } catch (e) {
