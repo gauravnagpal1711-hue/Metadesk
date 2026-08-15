@@ -1,0 +1,58 @@
+DEPLOY ADS DESK TO RAILWAY IN 5 MINUTES
+
+1. UNZIP THIS FILE
+   - You'll see: server/, client/, package.json, README.md, etc.
+   - Keep the folder structure exactly as is.
+
+2. CREATE A GITHUB REPO
+   - Go to github.com → New repository
+   - Name: ads-desk (or anything)
+   - Set to PRIVATE
+   - DO NOT add README, .gitignore, or anything else
+   - Click Create repository
+   - Copy the HTTPS URL (green Code button)
+
+3. PUSH TO GITHUB (Windows/Mac)
+   - Open GitHub Desktop
+   - File → Add Local Repository → pick this folder
+   - It will ask to create a repo — click Yes
+   - Click Publish repository → Keep private → Publish
+   - Done. Your code is on GitHub.
+
+4. CONNECT TO RAILWAY
+   - Go to railway.app (sign up or sign in)
+   - Click New Project
+   - Click Deploy from GitHub repo
+   - Pick your ads-desk repo
+   - Click Deploy
+   - Wait for it to fail (normal — no database yet)
+
+5. ADD POSTGRESQL
+   - Click the + button in the same Railway project
+   - Click Database → Add PostgreSQL
+   - Wait 30 seconds for it to provision
+
+6. SET THREE VARIABLES
+   - Click your app service (ads-desk)
+   - Click Variables tab
+   - Add these three:
+
+   DATABASE_URL = ${{Postgres.DATABASE_URL}}
+   APP_PASSWORD = MyPassword123!
+   JWT_SECRET = RandomString1234567890
+
+   After each, press Enter. It will redeploy.
+
+7. GET YOUR URL
+   - Click Settings tab
+   - Scroll to Networking
+   - Click Generate Domain
+   - You get: ads-desk-xxx.up.railway.app
+   - Open it, sign in with APP_PASSWORD
+   - Done!
+
+8. ADD META (OPTIONAL, LATER)
+   - Variables → Add META_ACCESS_TOKEN, META_AD_ACCOUNT_ID, META_PAGE_ID
+   - Go to Campaigns tab → Sync from Meta
+
+THAT'S IT. Questions? Check README.md in this folder.
