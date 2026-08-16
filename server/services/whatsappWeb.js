@@ -1,4 +1,4 @@
-—/**
+/**
  * WhatsApp Web pairing via Baileys — scan a QR code with your personal WhatsApp,
  * exactly like web.whatsapp.com. Session files live in WA_SESSION_DIR.
  *
