@@ -213,7 +213,7 @@ leadsRouter.post('/:id/messages', async (req, res, next) => {
 
 /* ---------- sync ---------- */
 
-leadsRouter.post('/sync/meta', async (req, res, next) => {
+leadsRouter.post('/meta/sync', async (req, res, next) => {
   try {
     if (!metaConfigured()) return res.status(400).json({ error: 'Meta is not connected.' });
     const forms = await listLeadForms();
@@ -236,7 +236,7 @@ leadsRouter.post('/sync/meta', async (req, res, next) => {
         count++;
       }
     }
-    res.json({ ok: true, synced: count });
+    res.json({ ok: true, imported: count });
   } catch (e) {
     next(e);
   }
