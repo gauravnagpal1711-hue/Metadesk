@@ -17,15 +17,15 @@ let { rows } = await q('SELECT * FROM leads WHERE phone = $1 ORDER BY created_at
 let lead = rows[0];
 
 if (!lead) {
-  // Create a "pending" lead that's not yet visible in the board
+      // Create a Meta-verified lead immediately. WhatsApp click-ads have no lead form to cross-check, so the inbound message itself is the verification.
   const { rows: firstStage } = await q('SELECT id FROM stages ORDER BY position LIMIT 1');
   const inserted = await q(
     `INSERT INTO leads (full_name, phone, source, wants_whatsapp, stage_id, is_meta_verified)
-    VALUES ($1,$2,'whatsapp',true,$3,false) RETURNING *`,
+    VALUES ($1,$2,'whatsapp',true,$3,true) RETURNING *`,
     [name || phone, phone, firstStage[0]?.id]
   );
   lead = inserted.rows[0];
-  console.log(`[WhatsApp] Created PENDING lead for phone ${phone} (waiting for Meta verification)`);
+      console.log(`[WhatsApp] Created verified lead for phone ${phone} from ad conversation`);
 }
 
 // Only store message if lead is Meta-verified
