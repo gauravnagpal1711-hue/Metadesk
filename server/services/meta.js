@@ -88,8 +88,11 @@ export async function listCampaigns() {
 
   return (campaigns.data || []).map((c) => {
     const i = byCampaign.get(c.id) || {};
-    const leadAction = (i.actions || []).find((a) => a.action_type === 'lead');
-    const leadCost = (i.cost_per_action_type || []).find((a) => a.action_type === 'lead');
+    const RESULT_ACTION_TYPES = ['lead', 'onsite_conversion.messaging_conversation_started_7d', 'onsite_conversion.total_messaging_connection'];
+        const valueFor = (type) => Number((i.actions || []).find((a) => a.action_type === type)?.value || 0);
+        const resultType = RESULT_ACTION_TYPES.find((t) => valueFor(t) > 0) || 'lead';
+        const leadAction = { value: valueFor(resultType) };
+        const leadCost = (i.cost_per_action_type || []).find((a) => a.action_type === resultType);
     return {
       id: c.id,
       name: c.name,
