@@ -27,6 +27,12 @@ export function onWebMessage(handler) {
         onIncoming = handler;
 }
 
+/** Fires once with a batch of historical messages after a fresh QR pairing. */
+let onHistory = async () => {};
+export function onHistorySync(handler) {
+        onHistory = handler;
+}
+
 export function webStatus() {
         return {
                   available: true,
@@ -69,6 +75,32 @@ function extractBody(rawMessage) {
                 );
 }
 
+/** Shared shape-normalizer for both live messages and history-sync messages. Returns null to skip. */
+function extractMessage(m) {
+        const jid = m.key.remoteJid || '';
+        if (jid.endsWith('@g.us')) return null; // skip groups
+
+  const rawFrom =
+                  m.key.senderPn ||
+                  m.key.participantPn ||
+                  (jid.endsWith('@lid') ? null : jid.split('@')[0]);
+        const from = rawFrom ? String(rawFrom).replace(/\D/g, '') : '';
+        if (!from) return null;
+
+  const msgKeys = Object.keys(m.message || {});
+        if (msgKeys.length === 0) return null; // undecryptable / no content
+
+  const body = extractBody(m.message || {});
+        return {
+                  from,
+                  name: m.pushName || null,
+                  body: body || '[media]',
+                  wa_message_id: m.key.id,
+                  ts: new Date(Number(m.messageTimestamp) * 1000),
+                  fromMe: !!m.key.fromMe
+        };
+}
+
 export async function startWeb() {
         if (state.starting || state.status === 'connected') return webStatus();
         state.starting = true;
@@ -95,7 +127,7 @@ export async function startWeb() {
                   const { state: authState, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
                   const { version } = await fetchLatestBaileysVersion();
 
-        sock = makeWASocket({ version, auth: authState, printQRInTerminal: false, syncFullHistory: false });
+        sock = makeWASocket({ version, auth: authState, printQRInTerminal: false, syncFullHistory: true });
                   state.sock = sock;
                   state.status = 'pairing';
 
@@ -134,42 +166,21 @@ export async function startWeb() {
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
             if (type !== 'notify') return;
             for (const m of messages) {
-                        if (m.key.fromMe) continue;
-                        const jid = m.key.remoteJid || '';
-                        if (jid.endsWith('@g.us')) continue; // skip groups
-
-              const rawFrom =
-                            m.key.senderPn ||
-                            m.key.participantPn ||
-                            (jid.endsWith('@lid') ? null : jid.split('@')[0]);
-                        const from = rawFrom ? String(rawFrom).replace(/\D/g, '') : '';
-                        if (!from) {
-                                      console.warn('Skipping WhatsApp message: could not resolve a phone number for jid', jid, 'key:', JSON.stringify(m.key));
+                        const extracted = extractMessage(m);
+                        if (!extracted) {
+                                      console.warn('Skipping WhatsApp message: no phone number or empty/undecryptable payload. key:', JSON.stringify(m.key));
                                       continue;
                         }
-
-              const msgKeys = Object.keys(m.message || {});
-                        if (msgKeys.length === 0) {
-                                      // Payload failed to decrypt (common on first delivery for @lid-addressed chats).
-                          // WhatsApp will automatically retry with a working session; skip so we don't
-                          // permanently store a fake "[media]" placeholder over what is really text.
-                          console.warn('Skipping WhatsApp message: empty/undecryptable payload, awaiting retry. key:', JSON.stringify(m.key));
-                                      continue;
-                        }
-
-              const body = extractBody(m.message || {});
-                        if (!body) {
-                                      console.warn('WhatsApp message had no extractable text, saving as [media]. Message keys:', msgKeys, 'unwrapped keys:', Object.keys(unwrapMessage(m.message || {})));
-                        }
-
-              await onIncoming({
-                            from,
-                            name: m.pushName || null,
-                            body: body || '[media]',
-                            wa_message_id: m.key.id,
-                            ts: new Date(Number(m.messageTimestamp) * 1000)
-              }).catch((e) => console.error('Incoming handler failed:', e.message));
+              await onIncoming(extracted).catch((e) => console.error('Incoming handler failed:', e.message));
             }
+  });
+
+  // Delivered once, in batches, right after a fresh QR pairing (syncFullHistory: true above).
+  sock.ev.on('messaging-history.set', async ({ messages, isLatest }) => {
+            const batch = (messages || []).map(extractMessage).filter(Boolean);
+            if (batch.length === 0) return;
+            console.log(`[WhatsApp] History sync: ${batch.length} messages${isLatest ? ' (final batch)' : ''}`);
+            await onHistory(batch).catch((e) => console.error('History sync handler failed:', e.message));
   });
 
   state.starting = false;

@@ -1,7 +1,7 @@
 import express from 'express';
 import { q, getSetting, setSetting } from '../db.js';
 import { cloudConfigured, parseWebhook } from '../services/whatsappCloud.js';
-import { startWeb, logoutWeb, webStatus, onWebMessage } from '../services/whatsappWeb.js';
+import { startWeb, logoutWeb, webStatus, onWebMessage, onHistorySync } from '../services/whatsappWeb.js';
 import { normalisePhone } from '../services/meta.js';
 
 export const whatsappRouter = express.Router();
@@ -20,15 +20,36 @@ function looksLikeAdGreeting(body, patterns) {
   return patterns.some((p) => p && text.includes(String(p).toLowerCase()));
 }
 
+/** True if this wa_message_id is already stored, so history syncs and redelivered
+ * live events don't duplicate rows. Messages without an id are never deduped. */
+async function alreadyStored(wa_message_id) {
+  if (!wa_message_id) return false;
+  const { rows } = await q('SELECT 1 FROM messages WHERE wa_message_id = $1 LIMIT 1', [wa_message_id]);
+  return rows.length > 0;
+}
+
 /**
 * Attach an incoming message to a lead, creating a PENDING lead if this number is new.
 * Only stores messages for Meta-verified leads.
 * Shared by both the Cloud API webhook and the WhatsApp Web listener.
 */
-export async function ingestIncoming({ from, name, body, wa_message_id, ts }) {
+export async function ingestIncoming({ from, name, body, wa_message_id, ts, fromMe }) {
 const phone = normalisePhone(from);
 let { rows } = await q('SELECT * FROM leads WHERE phone = $1 ORDER BY created_at ASC LIMIT 1', [phone]);
 let lead = rows[0];
+
+if (fromMe) {
+  // Our own reply, sent directly from the phone rather than through the app.
+  // Only worth recording if there's already a real lead to attach it to.
+  if (!lead || !lead.is_meta_verified) return lead || null;
+  if (await alreadyStored(wa_message_id)) return lead;
+  await q(
+    `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, created_at)
+    VALUES ($1,'out','whatsapp',$2,$3,$4)`,
+    [lead.id, body, wa_message_id, ts || new Date()]
+  );
+  return lead;
+}
 
 if (!lead) {
   const onlyExistingLeads = await getSetting('wa_only_existing_leads', false);
@@ -64,6 +85,7 @@ if (!lead) {
 
 // Only store message if lead is Meta-verified
 if (lead.is_meta_verified) {
+  if (await alreadyStored(wa_message_id)) return lead;
   await q(
     `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, created_at)
     VALUES ($1,'in','whatsapp',$2,$3,$4)`,
@@ -93,7 +115,36 @@ if (lead.is_meta_verified) {
 }
 }
 
+/**
+* Backfills conversation history delivered right after a fresh WhatsApp Web pairing.
+* Only attaches to leads that already exist (by phone) — a personal phone's full
+* history sync includes every chat on it, not just ad conversations, so we don't
+* want to queue a stranger's random texts as "pending" business messages.
+*/
+async function ingestHistoryBatch(items) {
+  let attached = 0;
+  for (const item of items) {
+    try {
+      const phone = normalisePhone(item.from);
+      const { rows } = await q('SELECT * FROM leads WHERE phone = $1 ORDER BY created_at ASC LIMIT 1', [phone]);
+      const lead = rows[0];
+      if (!lead || !lead.is_meta_verified) continue;
+      if (await alreadyStored(item.wa_message_id)) continue;
+      await q(
+        `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, created_at)
+        VALUES ($1,$2,'whatsapp',$3,$4,$5)`,
+        [lead.id, item.fromMe ? 'out' : 'in', item.body, item.wa_message_id, item.ts]
+      );
+      attached++;
+    } catch (e) {
+      console.error('History backfill failed for one message:', e.message);
+    }
+  }
+  if (attached > 0) console.log(`[WhatsApp] History sync: attached ${attached} message(s) to existing leads`);
+}
+
 onWebMessage(ingestIncoming);
+onHistorySync(ingestHistoryBatch);
 
 whatsappRouter.get('/status', (req, res) => {
 res.json({
