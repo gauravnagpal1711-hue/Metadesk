@@ -23,7 +23,7 @@
     "pg": "^8.12.0"
   },
   "optionalDependencies": {
-    "@whiskeysockets/baileys": "^6.7.9",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
     "qrcode": "^1.5.4"
   }
 }
