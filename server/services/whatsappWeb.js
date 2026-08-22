@@ -195,6 +195,15 @@ export async function startWeb() {
   });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
+            // Temporary diagnostic: confirm what's actually arriving before deciding
+            // whether the type !== 'notify' filter below is dropping real ad-click messages.
+            console.log(`[WhatsApp] messages.upsert type=${type} count=${messages?.length || 0}`,
+                        JSON.stringify((messages || []).map((m) => ({
+                                  remoteJid: m.key.remoteJid,
+                                  remoteJidAlt: m.key.remoteJidAlt,
+                                  fromMe: m.key.fromMe,
+                                  hasContent: Object.keys(m.message || {}).length > 0
+                        }))));
             if (type !== 'notify') return;
             for (const m of messages) {
                         const extracted = await extractMessage(m);
