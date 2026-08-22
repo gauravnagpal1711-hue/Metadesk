@@ -3,7 +3,7 @@ import { api } from '../api.js';
 
 export default function Connect({ onConnectionChange }) {
   const [status, setStatus] = useState(null);
-  const [settings, setSettings] = useState({ onlyExistingLeads: true });
+  const [settings, setSettings] = useState({ onlyExistingLeads: false });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const poll = useRef(null);

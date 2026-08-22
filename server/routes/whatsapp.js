@@ -17,7 +17,7 @@ let { rows } = await q('SELECT * FROM leads WHERE phone = $1 ORDER BY created_at
 let lead = rows[0];
 
 if (!lead) {
-  const onlyExistingLeads = await getSetting('wa_only_existing_leads', true);
+  const onlyExistingLeads = await getSetting('wa_only_existing_leads', false);
   if (onlyExistingLeads) {
     // Leads come from Meta only. Queue the message — if a matching Meta lead
     // syncs in later by this same phone number, it picks up this message then.
@@ -87,7 +87,7 @@ web: webStatus()
 // Only message existing leads: persisted here, enforced in ingestIncoming in a later phase.
 whatsappRouter.get('/settings', async (req, res, next) => {
 try {
-res.json({ onlyExistingLeads: await getSetting('wa_only_existing_leads', true) });
+res.json({ onlyExistingLeads: await getSetting('wa_only_existing_leads', false) });
 } catch (e) {
 next(e);
 }
