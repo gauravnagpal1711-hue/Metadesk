@@ -228,12 +228,40 @@ leadsRouter.post('/meta/sync', async (req, res, next) => {
           `INSERT INTO leads (meta_lead_id, form_id, campaign_id, campaign_name, full_name, phone, email, city,
           source, wants_whatsapp, is_meta_verified, stage_id, fields, created_at)
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'meta',$9,true,$10,$11,$12)
-          ON CONFLICT (meta_lead_id) DO NOTHING`,
+          ON CONFLICT (meta_lead_id) DO UPDATE SET
+            full_name=EXCLUDED.full_name, phone=EXCLUDED.phone, email=EXCLUDED.email, city=EXCLUDED.city,
+            wants_whatsapp=EXCLUDED.wants_whatsapp, fields=EXCLUDED.fields, is_meta_verified=true,
+            updated_at=now()`,
           [raw.id, raw.form_id || form.id, raw.campaign_id || null, raw.campaign_name || form.name,
           flat.full_name, flat.phone, flat.email, flat.city, wantsWhatsApp,
           firstStage[0]?.id, JSON.stringify(flat.fields), raw.created_time || new Date()]
         );
         count++;
+
+        // Upgrade any pending WhatsApp leads with the same phone to Meta-verified,
+        // and attach whatever messages were queued while waiting for this sync.
+        const { rows: upgradedLeads } = await q(
+          `UPDATE leads
+           SET is_meta_verified = true, meta_lead_id = COALESCE(meta_lead_id, $1), source = CASE WHEN source = 'whatsapp' THEN 'meta' ELSE source END, updated_at = now()
+           WHERE phone = $2 AND is_meta_verified = false
+           RETURNING id`,
+          [raw.id, flat.phone]
+        );
+        if (upgradedLeads.length > 0) {
+          const leadId = upgradedLeads[0].id;
+          const { rows: pendingMsgs } = await q(
+            `SELECT * FROM pending_messages WHERE phone = $1 ORDER BY created_at ASC`,
+            [flat.phone]
+          );
+          for (const msg of pendingMsgs) {
+            await q(
+              `INSERT INTO messages (lead_id, direction, channel, body, created_at)
+              VALUES ($1, 'in', $2, $3, $4)`,
+              [leadId, msg.channel, msg.body, msg.created_at]
+            );
+          }
+          await q(`DELETE FROM pending_messages WHERE phone = $1`, [flat.phone]);
+        }
       }
     }
     res.json({ ok: true, imported: count });

@@ -12,7 +12,7 @@ import { campaignsRouter } from './routes/campaigns.js';
 import { leadsRouter } from './routes/leads.js';
 import { whatsappRouter } from './routes/whatsapp.js';
 import { facebookRouter, restoreConnection } from './routes/facebook.js';
-import { listCampaigns, listLeadForms, fetchFormLeads, flattenLead, normalisePhone, metaConfigured } from './services/meta.js';
+import { listCampaigns, listLeadForms, fetchFormLeads, flattenLead, normalisePhone, metaConfigured, getConnection } from './services/meta.js';
 import { startWeb } from './services/whatsappWeb.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -79,9 +79,12 @@ async function syncEverything() {
     console.error('Campaign sync failed:', e.message);
   }
 
-  if (!process.env.META_PAGE_ID) return;
+  // The page can come from META_PAGE_ID (old manual setup) or, more commonly now,
+  // from the Facebook OAuth connection saved in the database.
+  const pageId = process.env.META_PAGE_ID || getConnection().pageId;
+  if (!pageId) return;
   try {
-    const forms = await listLeadForms();
+    const forms = await listLeadForms(pageId);
     const { rows: firstStage } = await q('SELECT id FROM stages ORDER BY position LIMIT 1');
     for (const form of forms) {
       const leads = await fetchFormLeads(form.id);

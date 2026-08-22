@@ -17,6 +17,18 @@ let { rows } = await q('SELECT * FROM leads WHERE phone = $1 ORDER BY created_at
 let lead = rows[0];
 
 if (!lead) {
+  const onlyExistingLeads = await getSetting('wa_only_existing_leads', true);
+  if (onlyExistingLeads) {
+    // Leads come from Meta only. Queue the message — if a matching Meta lead
+    // syncs in later by this same phone number, it picks up this message then.
+    await q(
+      `INSERT INTO pending_messages (phone, body, channel, created_at)
+      VALUES ($1, $2, 'whatsapp', $3)`,
+      [phone, body, ts || new Date()]
+    );
+    console.log(`[WhatsApp] Message from unknown number ${phone} queued — waiting for a matching Meta lead`);
+    return null;
+  }
       // Create a Meta-verified lead immediately. WhatsApp click-ads have no lead form to cross-check, so the inbound message itself is the verification.
   const { rows: firstStage } = await q('SELECT id FROM stages ORDER BY position LIMIT 1');
   const inserted = await q(
@@ -75,7 +87,7 @@ web: webStatus()
 // Only message existing leads: persisted here, enforced in ingestIncoming in a later phase.
 whatsappRouter.get('/settings', async (req, res, next) => {
 try {
-res.json({ onlyExistingLeads: await getSetting('wa_only_existing_leads', false) });
+res.json({ onlyExistingLeads: await getSetting('wa_only_existing_leads', true) });
 } catch (e) {
 next(e);
 }
