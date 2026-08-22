@@ -3,7 +3,9 @@ import { api } from '../api.js';
 
 export default function Connect({ onConnectionChange }) {
   const [status, setStatus] = useState(null);
-  const [settings, setSettings] = useState({ onlyExistingLeads: false });
+  const [settings, setSettings] = useState({ onlyExistingLeads: false, adGreetingPatterns: [] });
+  const [patternsDraft, setPatternsDraft] = useState('');
+  const [savingPatterns, setSavingPatterns] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const poll = useRef(null);
@@ -19,7 +21,10 @@ export default function Connect({ onConnectionChange }) {
 
   useEffect(() => {
     refresh();
-    api.get('/whatsapp/settings').then(setSettings).catch(() => {});
+    api.get('/whatsapp/settings').then((s) => {
+      setSettings(s);
+      setPatternsDraft((s.adGreetingPatterns || []).join('\n'));
+    }).catch(() => {});
     poll.current = setInterval(refresh, 3000);
     return () => clearInterval(poll.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -52,12 +57,26 @@ export default function Connect({ onConnectionChange }) {
 
   async function toggleOnlyExisting() {
     const next = !settings.onlyExistingLeads;
-    setSettings({ onlyExistingLeads: next });
+    setSettings((s) => ({ ...s, onlyExistingLeads: next }));
     try {
       await api.patch('/whatsapp/settings', { onlyExistingLeads: next });
     } catch (e) {
-      setSettings({ onlyExistingLeads: !next });
+      setSettings((s) => ({ ...s, onlyExistingLeads: !next }));
       setError(e.message);
+    }
+  }
+
+  async function savePatterns() {
+    setSavingPatterns(true);
+    setError('');
+    try {
+      const patterns = patternsDraft.split('\n').map((p) => p.trim()).filter(Boolean);
+      const updated = await api.patch('/whatsapp/settings', { adGreetingPatterns: patterns });
+      setSettings((s) => ({ ...s, adGreetingPatterns: updated.adGreetingPatterns }));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSavingPatterns(false);
     }
   }
 
@@ -158,10 +177,31 @@ export default function Connect({ onConnectionChange }) {
       <div className="card" style={{ marginTop: 20 }}>
         <h2>What happens after pairing</h2>
         <p style={{ color: 'var(--muted)', margin: 0, fontSize: 13 }}>
-          Every incoming message is matched to a lead by phone number. If the number is new, a lead is created
-          in your first funnel stage. Replies you send from the Leads tab are logged on the same trail, so the
-          full conversation sits next to the remarks for that lead.
+          Every incoming message is matched to a lead by phone number. For campaigns with an Instant Form,
+          the lead already exists from the Meta sync, so the message just attaches to it. For click-to-WhatsApp
+          campaigns with no form, a new lead is only created when the first message looks like a real ad
+          click — see below. Anything else is queued, not turned into a lead, until it matches one.
         </p>
+      </div>
+
+      <div className="card" style={{ marginTop: 20 }}>
+        <h2>Ad-click greetings</h2>
+        <p style={{ color: 'var(--muted)', marginTop: 0, fontSize: 13 }}>
+          Meta prefills a message when someone taps a click-to-WhatsApp ad — the exact wording is whatever
+          you set in that ad's message template. List each variant you use (one per line, case-insensitive,
+          partial match) so a first message matching one of these creates a lead. Anything else from an
+          unknown number is queued instead of becoming a lead.
+        </p>
+        <textarea
+          className="textarea"
+          style={{ minHeight: 90, fontFamily: 'var(--mono)', fontSize: 12.5 }}
+          value={patternsDraft}
+          onChange={(e) => setPatternsDraft(e.target.value)}
+          placeholder="Hello! I filled in your form and would like to know more about your business."
+        />
+        <button className="btn primary" style={{ marginTop: 10 }} onClick={savePatterns} disabled={savingPatterns}>
+          {savingPatterns ? 'Saving…' : 'Save greeting patterns'}
+        </button>
       </div>
     </>
   );

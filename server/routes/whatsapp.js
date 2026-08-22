@@ -6,6 +6,20 @@ import { normalisePhone } from '../services/meta.js';
 
 export const whatsappRouter = express.Router();
 
+// The exact prefilled greeting Meta hands someone who clicks a Click-to-WhatsApp
+// ad varies per campaign (it's set in the ad's "message template"), so this is a
+// list, not a single string — editable via /api/whatsapp/settings.
+const DEFAULT_AD_GREETING_PATTERNS = [
+  'I filled in your form and would like to know more about your business'
+];
+
+/** True if the message text looks like a Meta ad-click greeting, not an ordinary reply. */
+function looksLikeAdGreeting(body, patterns) {
+  if (!body) return false;
+  const text = body.toLowerCase();
+  return patterns.some((p) => p && text.includes(String(p).toLowerCase()));
+}
+
 /**
 * Attach an incoming message to a lead, creating a PENDING lead if this number is new.
 * Only stores messages for Meta-verified leads.
@@ -18,18 +32,26 @@ let lead = rows[0];
 
 if (!lead) {
   const onlyExistingLeads = await getSetting('wa_only_existing_leads', false);
-  if (onlyExistingLeads) {
-    // Leads come from Meta only. Queue the message — if a matching Meta lead
-    // syncs in later by this same phone number, it picks up this message then.
+  const patterns = await getSetting('wa_ad_greeting_patterns', DEFAULT_AD_GREETING_PATTERNS);
+  const isAdGreeting = looksLikeAdGreeting(body, patterns);
+
+  if (onlyExistingLeads || !isAdGreeting) {
+    // Either leads are Meta-forms-only for now, or this message doesn't look like
+    // a genuine ad-click conversation (so we won't turn a random text into a lead).
+    // Queue it — if a matching lead shows up later by this phone number, it's attached then.
     await q(
       `INSERT INTO pending_messages (phone, body, channel, created_at)
       VALUES ($1, $2, 'whatsapp', $3)`,
       [phone, body, ts || new Date()]
     );
-    console.log(`[WhatsApp] Message from unknown number ${phone} queued — waiting for a matching Meta lead`);
+    console.log(
+      onlyExistingLeads
+        ? `[WhatsApp] Message from unknown number ${phone} queued — leads are Meta-only right now`
+        : `[WhatsApp] Message from unknown number ${phone} queued — first message didn't match a known ad greeting`
+    );
     return null;
   }
-      // Create a Meta-verified lead immediately. WhatsApp click-ads have no lead form to cross-check, so the inbound message itself is the verification.
+      // Message matches a known ad-click greeting — this is a real click-to-WhatsApp lead.
   const { rows: firstStage } = await q('SELECT id FROM stages ORDER BY position LIMIT 1');
   const inserted = await q(
     `INSERT INTO leads (full_name, phone, source, wants_whatsapp, stage_id, is_meta_verified)
@@ -84,10 +106,12 @@ web: webStatus()
 });
 });
 
-// Only message existing leads: persisted here, enforced in ingestIncoming in a later phase.
 whatsappRouter.get('/settings', async (req, res, next) => {
 try {
-res.json({ onlyExistingLeads: await getSetting('wa_only_existing_leads', false) });
+res.json({
+  onlyExistingLeads: await getSetting('wa_only_existing_leads', false),
+  adGreetingPatterns: await getSetting('wa_ad_greeting_patterns', DEFAULT_AD_GREETING_PATTERNS)
+});
 } catch (e) {
 next(e);
 }
@@ -95,9 +119,15 @@ next(e);
 
 whatsappRouter.patch('/settings', async (req, res, next) => {
 try {
-const { onlyExistingLeads } = req.body || {};
-await setSetting('wa_only_existing_leads', !!onlyExistingLeads);
-res.json({ onlyExistingLeads: !!onlyExistingLeads });
+const { onlyExistingLeads, adGreetingPatterns } = req.body || {};
+if (onlyExistingLeads !== undefined) await setSetting('wa_only_existing_leads', !!onlyExistingLeads);
+if (Array.isArray(adGreetingPatterns)) {
+  await setSetting('wa_ad_greeting_patterns', adGreetingPatterns.map((p) => String(p).trim()).filter(Boolean));
+}
+res.json({
+  onlyExistingLeads: await getSetting('wa_only_existing_leads', false),
+  adGreetingPatterns: await getSetting('wa_ad_greeting_patterns', DEFAULT_AD_GREETING_PATTERNS)
+});
 } catch (e) {
 next(e);
 }
