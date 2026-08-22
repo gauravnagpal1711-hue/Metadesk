@@ -28,7 +28,6 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
 
   if (!data) return null;
   const { lead, messages, remarks, activity } = data;
-  const stage = stages.find((s) => s.id === lead.stage_id);
 
   async function send() {
     if (!draft.trim()) return;
@@ -53,7 +52,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   }
 
   async function moveTo(stageId) {
-    await api.patch(`/leads/${leadId}/move`, { stage_id: Number(stageId) });
+    await api.patch(`/leads/${leadId}/move`, { stage_id: stageId });
     await load();
   }
 
@@ -67,27 +66,48 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
     <>
       <div className="scrim" onClick={onClose} />
       <aside className="drawer" role="dialog" aria-label={lead.full_name || 'Lead'}>
-        <header className="drawer-head">
-          <div style={{ display: 'flex', alignItems: 'start', gap: 10 }}>
-            <div style={{ flex: 1 }}>
+        <div className="drawer-head">
+          <div className="top">
+            <div style={{ flex: 1, minWidth: 0 }}>
               <h2>{lead.full_name || 'Unnamed lead'}</h2>
-              <div className="meta">{lead.phone || 'No phone'} {lead.city ? `· ${lead.city}` : ''}</div>
+              <div className="meta">{lead.phone || 'No phone'}</div>
             </div>
-            <button className="btn ghost sm" onClick={onClose} aria-label="Close">✕</button>
+            <button className="close" onClick={onClose} aria-label="Close">×</button>
           </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center' }}>
-            <select className="select" style={{ maxWidth: 190 }} value={lead.stage_id || ''} onChange={(e) => moveTo(e.target.value)}>
-              {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-            {stage && <span className="col-dot" style={{ background: stage.color }} />}
-            {lead.campaign_name && <span className="tag off">{lead.campaign_name}</span>}
+          <div className="stage-chips">
+            <span className="mono-label">Stage</span>
+            {stages.map((s) => (
+              <button
+                key={s.id}
+                className={`stage-chip ${lead.stage_id === s.id ? 'on' : ''}`}
+                onClick={() => moveTo(s.id)}
+              >
+                {s.name}
+              </button>
+            ))}
           </div>
-        </header>
+        </div>
+
+        <div className="drawer-info">
+          <div className="cell">
+            <div className="k">City</div>
+            <div className="v">{lead.city || '—'}</div>
+          </div>
+          <div className="cell">
+            <div className="k">Source</div>
+            <div className="v">{lead.campaign_name || lead.source || '—'}</div>
+          </div>
+          <div className="cell">
+            <div className="k">Received</div>
+            <div className="v">{when(lead.created_at)}</div>
+          </div>
+        </div>
 
         <nav className="drawer-tabs">
           {[
-            ['chat', `Conversation ${messages.length ? `(${messages.length})` : ''}`],
-            ['notes', `Remarks ${remarks.length ? `(${remarks.length})` : ''}`],
+            ['chat', `Conversation${messages.length ? ` (${messages.length})` : ''}`],
+            ['notes', `Remarks${remarks.length ? ` (${remarks.length})` : ''}`],
+            ['log', `Activity${activity.length ? ` (${activity.length})` : ''}`],
             ['details', 'Details']
           ].map(([id, label]) => (
             <button key={id} className={`drawer-tab ${view === id ? 'on' : ''}`} onClick={() => setView(id)}>
@@ -105,7 +125,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
             ) : (
               <>
                 {messages.map((m) => (
-                  <div key={m.id} className={`bubble ${m.direction}`}>
+                  <div key={m.id} className={`bubble ${m.direction === 'out' ? 'out' : 'in'}`}>
                     <div>{m.body}</div>
                     <div className="t">{new Date(m.created_at).toLocaleString()}</div>
                   </div>
@@ -135,6 +155,20 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
             </>
           )}
 
+          {view === 'log' && (
+            activity.length === 0 ? (
+              <div className="empty"><h3>No activity yet</h3>Stage changes and syncs show up here.</div>
+            ) : (
+              activity.map((a) => (
+                <div className="activity-row" key={a.id}>
+                  <span className="dot" />
+                  <div className="text">{a.detail}</div>
+                  <span className="time">{when(a.created_at)}</span>
+                </div>
+              ))
+            )
+          )}
+
           {view === 'details' && (
             <>
               {[
@@ -157,7 +191,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
 
               {lead.fields && Object.keys(lead.fields).length > 0 && (
                 <>
-                  <h3 style={{ fontFamily: 'var(--display)', fontSize: 14, margin: '18px 0 8px' }}>Form answers</h3>
+                  <div className="mono-label" style={{ margin: '4px 0 4px' }}>Form answers</div>
                   <dl className="kv">
                     {Object.entries(lead.fields).map(([k, v]) => (
                       <div key={k} style={{ display: 'contents' }}>
@@ -168,17 +202,6 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
                   </dl>
                 </>
               )}
-
-              {activity.length > 0 && (
-                <>
-                  <h3 style={{ fontFamily: 'var(--display)', fontSize: 14, margin: '18px 0 8px' }}>History</h3>
-                  {activity.map((a) => (
-                    <div key={a.id} style={{ color: 'var(--muted)', fontSize: 12, marginBottom: 5 }}>
-                      {a.detail} · {when(a.created_at)}
-                    </div>
-                  ))}
-                </>
-              )}
             </>
           )}
         </div>
@@ -187,7 +210,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
           <div className="drawer-foot">
             <input
               className="input"
-              placeholder="Message on WhatsApp"
+              placeholder="Reply on WhatsApp"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && send()}

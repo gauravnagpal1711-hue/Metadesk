@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 
-export default function Connect() {
+export default function Connect({ onConnectionChange }) {
   const [status, setStatus] = useState(null);
+  const [settings, setSettings] = useState({ onlyExistingLeads: false });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const poll = useRef(null);
@@ -10,6 +11,7 @@ export default function Connect() {
   async function refresh() {
     try {
       setStatus(await api.get('/whatsapp/status'));
+      onConnectionChange?.();
     } catch (e) {
       setError(e.message);
     }
@@ -17,8 +19,10 @@ export default function Connect() {
 
   useEffect(() => {
     refresh();
+    api.get('/whatsapp/settings').then(setSettings).catch(() => {});
     poll.current = setInterval(refresh, 3000);
     return () => clearInterval(poll.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function connect() {
@@ -46,9 +50,21 @@ export default function Connect() {
     }
   }
 
+  async function toggleOnlyExisting() {
+    const next = !settings.onlyExistingLeads;
+    setSettings({ onlyExistingLeads: next });
+    try {
+      await api.patch('/whatsapp/settings', { onlyExistingLeads: next });
+    } catch (e) {
+      setSettings({ onlyExistingLeads: !next });
+      setError(e.message);
+    }
+  }
+
   if (!status) return null;
   const web = status.web || {};
   const origin = window.location.origin;
+  const waStatus = web.status === 'connected' ? 'good' : web.status === 'pairing' ? 'warn' : '';
 
   return (
     <>
@@ -56,38 +72,39 @@ export default function Connect() {
 
       <div className="grid2">
         <div className="card">
-          <h2 style={{ fontFamily: 'var(--display)', fontSize: 16, margin: '0 0 4px' }}>WhatsApp Web</h2>
-          <p style={{ color: 'var(--muted)', marginTop: 0 }}>
-            Pair your personal number by scanning a QR code, the same way web.whatsapp.com works.
-          </p>
-
-          <div style={{ marginBottom: 14 }}>
-            <span className={`tag ${web.status === 'connected' ? 'good' : web.status === 'pairing' ? 'warn' : 'off'}`}>
-              {web.status}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <h2 style={{ margin: 0 }}>Pair by QR</h2>
+            <span className={`pill-status ${waStatus}`} style={{ marginLeft: 'auto' }}>
+              <span className="dot" />{web.status === 'connected' ? 'Connected' : web.status === 'pairing' ? 'Waiting for scan' : 'Not connected'}
             </span>
-            {web.me && <span className="num" style={{ marginLeft: 8 }}>{web.me}</span>}
           </div>
 
-          {web.status === 'pairing' && web.qr && (
-            <div className="qr" style={{ marginBottom: 14 }}>
-              <img src={web.qr} alt="Scan this QR code with WhatsApp" />
-            </div>
-          )}
+          <div style={{ display: 'flex', gap: 16, marginTop: 16, alignItems: 'center' }}>
+            {web.status === 'pairing' && web.qr ? (
+              <div className="qr" style={{ flex: '0 0 152px' }}>
+                <img src={web.qr} alt="Scan this QR code with WhatsApp" />
+              </div>
+            ) : (
+              <div className="qr" style={{ flex: '0 0 152px', color: 'var(--muted-2)', fontSize: 12 }}>
+                {web.status === 'connected' ? web.me || 'Linked' : 'No code yet'}
+              </div>
+            )}
+            <ol className="steps">
+              <li>Open WhatsApp on the ad phone.</li>
+              <li>Settings → Linked devices → Link a device.</li>
+              <li>Scan this code. It refreshes automatically.</li>
+            </ol>
+          </div>
 
-          {web.status !== 'connected' ? (
-            <>
-              <ol className="steps" style={{ marginBottom: 14 }}>
-                <li>Tap Start pairing to generate a code.</li>
-                <li>On your phone open WhatsApp → Settings → Linked devices.</li>
-                <li>Tap Link a device and scan the code above.</li>
-              </ol>
+          <div style={{ marginTop: 14 }}>
+            {web.status !== 'connected' ? (
               <button className="btn primary" onClick={connect} disabled={busy}>
                 {busy ? 'Starting…' : web.qr ? 'Refresh code' : 'Start pairing'}
               </button>
-            </>
-          ) : (
-            <button className="btn danger" onClick={disconnect} disabled={busy}>Unlink this number</button>
-          )}
+            ) : (
+              <button className="btn danger" onClick={disconnect} disabled={busy}>Unlink this number</button>
+            )}
+          </div>
 
           {web.error && <div className="notice bad" style={{ marginTop: 14 }}>{web.error}</div>}
 
@@ -98,25 +115,37 @@ export default function Connect() {
         </div>
 
         <div className="card">
-          <h2 style={{ fontFamily: 'var(--display)', fontSize: 16, margin: '0 0 4px' }}>WhatsApp Cloud API</h2>
-          <p style={{ color: 'var(--muted)', marginTop: 0 }}>
-            The official route. Steadier for volume, and it survives redeploys.
-          </p>
-
-          <div style={{ marginBottom: 14 }}>
-            <span className={`tag ${status.cloud.connected ? 'good' : 'off'}`}>
-              {status.cloud.connected ? 'connected' : 'not connected'}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <h2 style={{ margin: 0 }}>Cloud API webhook</h2>
+            <span className={`pill-status ${status.cloud.connected ? 'good' : ''}`} style={{ marginLeft: 'auto' }}>
+              <span className="dot" />{status.cloud.connected ? 'Connected' : 'Not connected'}
             </span>
           </div>
+          <p style={{ color: 'var(--muted)', marginTop: 8, fontSize: 12.5 }}>
+            Alternative to QR pairing. Incoming messages match existing leads by phone only.
+          </p>
 
-          <dl className="kv">
-            <dt>Phone number ID</dt>
-            <dd>{status.cloud.phoneNumberId || 'WA_PHONE_NUMBER_ID not set'}</dd>
-            <dt>Callback URL</dt>
-            <dd>{origin}{status.cloud.webhookPath}</dd>
-            <dt>Verify token</dt>
-            <dd>value of WA_VERIFY_TOKEN</dd>
-          </dl>
+          <div className="field" style={{ marginTop: 14 }}>
+            <label htmlFor="cb">Callback URL</label>
+            <input id="cb" className="input num" readOnly value={`${origin}${status.cloud.webhookPath}`} />
+          </div>
+          <div className="field">
+            <label htmlFor="vt">Verify token</label>
+            <input id="vt" className="input num" readOnly value="value of WA_VERIFY_TOKEN" />
+          </div>
+
+          <div className="provider-row">
+            <span style={{ fontSize: 12.5, color: 'var(--muted-3)' }}>Only message existing leads</span>
+            <button
+              type="button"
+              className={`toggle ${settings.onlyExistingLeads ? 'on' : ''}`}
+              style={{ marginLeft: 'auto' }}
+              onClick={toggleOnlyExisting}
+              aria-pressed={settings.onlyExistingLeads}
+            >
+              <span />
+            </button>
+          </div>
 
           <ol className="steps" style={{ marginTop: 16 }}>
             <li>In Meta for Developers, open your app → WhatsApp → Configuration.</li>
@@ -127,8 +156,8 @@ export default function Connect() {
       </div>
 
       <div className="card" style={{ marginTop: 20 }}>
-        <h2 style={{ fontFamily: 'var(--display)', fontSize: 16, margin: '0 0 6px' }}>What happens after pairing</h2>
-        <p style={{ color: 'var(--muted)', margin: 0 }}>
+        <h2>What happens after pairing</h2>
+        <p style={{ color: 'var(--muted)', margin: 0, fontSize: 13 }}>
           Every incoming message is matched to a lead by phone number. If the number is new, a lead is created
           in your first funnel stage. Replies you send from the Leads tab are logged on the same trail, so the
           full conversation sits next to the remarks for that lead.

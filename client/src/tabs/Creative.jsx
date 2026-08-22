@@ -125,11 +125,11 @@ export default function Creative() {
       {error && <div className="notice bad">{error}</div>}
 
       <div className="grid2">
-        <div className="card">
-          <h2 style={{ fontFamily: 'var(--display)', fontSize: 15, margin: '0 0 12px' }}>The brief</h2>
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <h2>Campaign brief</h2>
 
-          <div className="field">
-            <label htmlFor="brief">What are you advertising?</label>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label htmlFor="brief">Brief — who it's for, the offer, the angle</label>
             <textarea
               id="brief"
               className="textarea"
@@ -138,37 +138,56 @@ export default function Creative() {
               onChange={(e) => setBrief(e.target.value)}
             />
           </div>
-          <div className="field">
-            <label htmlFor="offer">Offer</label>
-            <input id="offer" className="input" placeholder="20% off making charges" value={offer} onChange={(e) => setOffer(e.target.value)} />
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label htmlFor="offer">Offer</label>
+              <input id="offer" className="input" placeholder="20% off making charges" value={offer} onChange={(e) => setOffer(e.target.value)} />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label htmlFor="aud">Audience</label>
+              <input id="aud" className="input" placeholder="Women 28-45, Mumbai" value={audience} onChange={(e) => setAudience(e.target.value)} />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label htmlFor="style">Look</label>
+              <select id="style" className="select" value={style} onChange={(e) => setStyle(e.target.value)}>
+                <option>Bright, premium</option>
+                <option>Warm, festive</option>
+                <option>Dark, luxury</option>
+                <option>Clean, minimal</option>
+                <option>Candid, lifestyle</option>
+              </select>
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label htmlFor="sz">Placement</label>
+              <select id="sz" className="select" value={size} onChange={(e) => setSize(e.target.value)}>
+                {SIZES.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
+              </select>
+            </div>
           </div>
-          <div className="field">
-            <label htmlFor="aud">Audience</label>
-            <input id="aud" className="input" placeholder="Women 28-45, Mumbai" value={audience} onChange={(e) => setAudience(e.target.value)} />
-          </div>
-          <div className="field">
-            <label htmlFor="style">Look</label>
-            <select id="style" className="select" value={style} onChange={(e) => setStyle(e.target.value)}>
-              <option>Bright, premium</option>
-              <option>Warm, festive</option>
-              <option>Dark, luxury</option>
-              <option>Clean, minimal</option>
-              <option>Candid, lifestyle</option>
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="sz">Placement</label>
-            <select id="sz" className="select" value={size} onChange={(e) => setSize(e.target.value)}>
-              {SIZES.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
-            </select>
-          </div>
+
           <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
             <input type="checkbox" checked={textInImage} onChange={(e) => setTextInImage(e.target.checked)} />
             Put the offer text inside the image
           </label>
 
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <span className="mono-label">Output</span>
+            <div className="output-toggle">
+              <button type="button" className="opt on">Image</button>
+              <button type="button" className="opt" disabled title="Video generation isn't available yet">
+                Video · coming soon
+              </button>
+            </div>
+            <div className="provider-row">
+              <span className="dot" style={{ background: providers.image ? 'var(--good)' : 'var(--muted-2)' }} />
+              <span className="name">OpenAI API</span>
+              <span className="model">GPT-IMAGE-1</span>
+            </div>
+          </div>
+
           {providers.copy && (
-            <button className="btn primary" style={{ marginTop: 16 }} onClick={writeCopy} disabled={!brief || busy === 'copy'}>
+            <button className="btn primary" onClick={writeCopy} disabled={!brief || busy === 'copy'}>
               {busy === 'copy' ? 'Writing…' : 'Write the ad copy for me'}
             </button>
           )}
@@ -177,7 +196,7 @@ export default function Creative() {
         <div>
           <div className="card" style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <h2 style={{ fontFamily: 'var(--display)', fontSize: 15, margin: 0, flex: 1 }}>Image prompt</h2>
+              <h2 style={{ margin: 0, flex: 1 }}>Image prompt</h2>
               <span className="tag off">updates as you type</span>
             </div>
             <textarea
@@ -200,7 +219,7 @@ export default function Creative() {
           </div>
 
           <div className="card" style={{ marginBottom: 16 }}>
-            <h2 style={{ fontFamily: 'var(--display)', fontSize: 15, margin: '0 0 10px' }}>Bring the artwork back</h2>
+            <h2>Bring the artwork back</h2>
             <ol className="steps" style={{ marginBottom: 14 }}>
               <li>Copy the prompt and paste it into ChatGPT.</li>
               <li>Download the image it gives you.</li>
@@ -217,7 +236,7 @@ export default function Creative() {
           </div>
 
           <div className="card">
-            <h2 style={{ fontFamily: 'var(--display)', fontSize: 15, margin: '0 0 12px' }}>Ad copy</h2>
+            <h2>Ad copy</h2>
             <div className="field">
               <label htmlFor="hl">Headline</label>
               <input id="hl" className="input" maxLength={40} value={copy.headline} onChange={(e) => setCopy({ ...copy, headline: e.target.value })} />
@@ -241,9 +260,10 @@ export default function Creative() {
         </div>
       </div>
 
-      <h2 style={{ fontFamily: 'var(--display)', fontSize: 16, margin: '28px 0 12px' }}>
-        Saved creatives <span className="num" style={{ color: 'var(--muted)' }}>{gallery.length}</span>
-      </h2>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '28px 0 12px' }}>
+        <h2 style={{ margin: 0, fontSize: 16 }}>Gallery</h2>
+        <span className="mono-label">{gallery.length} creatives</span>
+      </div>
 
       {gallery.length === 0 ? (
         <div className="empty">

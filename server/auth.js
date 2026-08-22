@@ -3,17 +3,23 @@ import jwt from 'jsonwebtoken';
 
 const SECRET = process.env.JWT_SECRET || 'change-me-in-railway-variables';
 const APP_PASSWORD = process.env.APP_PASSWORD || '';
+const APP_USERNAME = process.env.APP_USERNAME || '';
 const COOKIE = 'mam_token';
 
 export const authRouter = express.Router();
 
 authRouter.post('/login', (req, res) => {
-  const { password } = req.body || {};
+  const { username, password } = req.body || {};
   if (!APP_PASSWORD) {
     return res.status(500).json({ error: 'APP_PASSWORD is not set on the server.' });
   }
+  // APP_USERNAME is optional — if it isn't set, any username is accepted so
+  // deployments that only ever configured APP_PASSWORD keep working.
+  if (APP_USERNAME && username !== APP_USERNAME) {
+    return res.status(401).json({ error: 'That username or password does not match. Try again.' });
+  }
   if (password !== APP_PASSWORD) {
-    return res.status(401).json({ error: 'That password does not match. Try again.' });
+    return res.status(401).json({ error: 'That username or password does not match. Try again.' });
   }
   const token = jwt.sign({ sub: 'owner' }, SECRET, { expiresIn: '30d' });
   res.cookie(COOKIE, token, {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, when } from '../api.js';
 import LeadDrawer from '../components/LeadDrawer.jsx';
 
-export default function Leads() {
+export default function Leads({ query, onBoardLoaded, syncSignal }) {
   const [stages, setStages] = useState([]);
   const [leads, setLeads] = useState([]);
   const [dragId, setDragId] = useState(null);
@@ -10,19 +10,19 @@ export default function Leads() {
   const [openId, setOpenId] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [query, setQuery] = useState('');
 
   const load = useCallback(async () => {
     const board = await api.get('/leads/board');
     setStages(board.stages);
     setLeads(board.leads);
-  }, []);
+    onBoardLoaded?.(board.leads);
+  }, [onBoardLoaded]);
 
   useEffect(() => {
     load().catch((e) => setError(e.message));
     const t = setInterval(() => load().catch(() => {}), 30000);
     return () => clearInterval(t);
-  }, [load]);
+  }, [load, syncSignal]);
 
   async function pullFromMeta() {
     setBusy(true);
@@ -61,7 +61,7 @@ export default function Leads() {
     setOpenId(created.id);
   }
 
-  const term = query.trim().toLowerCase();
+  const term = (query || '').trim().toLowerCase();
   const visible = term
     ? leads.filter((l) =>
         [l.full_name, l.phone, l.email, l.city, l.campaign_name]
@@ -70,28 +70,29 @@ export default function Leads() {
       )
     : leads;
 
+  const wonCount = leads.filter((l) => stages.find((s) => s.id === l.stage_id)?.is_won).length;
+
   return (
     <>
-      {error && <div className="notice bad">{error}</div>}
-
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        <button className="btn primary" onClick={pullFromMeta} disabled={busy}>
-          {busy ? 'Pulling…' : 'Pull leads from Meta'}
-        </button>
-        <button className="btn" onClick={addLead}>Add lead</button>
-        <input
-          className="input"
-          style={{ maxWidth: 240 }}
-          placeholder="Search name, phone, city"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <span style={{ color: 'var(--muted)' }} className="num">{visible.length} leads</span>
+      <div className="board-bar">
+        <div className="mono-label" style={{ textTransform: 'uppercase' }}>
+          {leads.length} LEADS · {wonCount} WON · {stages.length} STAGES
+        </div>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <button className="btn" onClick={addLead}>Add lead manually</button>
+          <button className="btn primary" onClick={pullFromMeta} disabled={busy}>
+            {busy ? 'Pulling…' : 'Pull from Meta'}
+          </button>
+        </div>
       </div>
+
+      {error && <div className="notice bad" style={{ margin: '12px 24px 0' }}>{error}</div>}
 
       <div className="board">
         {stages.map((stage) => {
+          const stageLeads = leads.filter((l) => l.stage_id === stage.id);
           const items = visible.filter((l) => l.stage_id === stage.id);
+          const value = stageLeads.reduce((a, l) => a + Number(l.value || 0), 0);
           return (
             <section
               key={stage.id}
@@ -105,37 +106,34 @@ export default function Leads() {
                 <span className="col-name">{stage.name}</span>
                 <span className="col-count">{items.length}</span>
               </header>
+              <div className="col-value">
+                {stage.is_won ? 'PIPELINE CLOSED' : `${items.length} OF ${stageLeads.length} SHOWN`}
+              </div>
+
               <div className="col-body">
                 {items.map((lead) => (
                   <article
                     key={lead.id}
                     className={`lead ${dragId === lead.id ? 'dragging' : ''}`}
-                    style={{ '--spine': stage.color }}
                     draggable
                     onDragStart={() => setDragId(lead.id)}
                     onDragEnd={() => setDragId(null)}
                     onClick={() => setOpenId(lead.id)}
                   >
-                    <div className="who">{lead.full_name || 'Unnamed lead'}</div>
+                    <div className="top-row">
+                      <span className="who">{lead.full_name || 'Unnamed lead'}</span>
+                      <span className="age">{when(lead.created_at)}</span>
+                    </div>
                     {lead.phone && <div className="meta">{lead.phone}</div>}
                     {lead.campaign_name && <div className="campaign">{lead.campaign_name}</div>}
                     <div className="row">
-                      {lead.wants_whatsapp && <span className="tag good">WhatsApp</span>}
-                      {lead.source === 'meta' && <span className="tag">Meta</span>}
-                      {lead.source === 'manual' && <span className="tag off">Manual</span>}
-                      {lead.message_count > 0 && <span className="tag off">{lead.message_count} msg</span>}
-                      {lead.remark_count > 0 && <span className="tag off">{lead.remark_count} note</span>}
-                      <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted)' }}>
-                        {when(lead.last_message_at || lead.created_at)}
-                      </span>
+                      {lead.message_count > 0 && <span className="tag">{lead.message_count} msg</span>}
+                      <span className="tag off">{lead.remark_count || 0} note</span>
+                      {lead.city && <span className="city">{lead.city}</span>}
                     </div>
                   </article>
                 ))}
-                {items.length === 0 && (
-                  <div style={{ color: 'var(--muted)', fontSize: 12, padding: '10px 6px' }}>
-                    Drop a lead here.
-                  </div>
-                )}
+                {items.length === 0 && <div className="col-empty">Drop leads here</div>}
               </div>
             </section>
           );

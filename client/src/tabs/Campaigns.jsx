@@ -1,17 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { api, money, when } from '../api.js';
 
-export default function Campaigns() {
-  const [rows, setRows] = useState([]);
-  const [conn, setConn] = useState({ connected: false });
+export default function Campaigns({ rows, setRows, conn, onSynced }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [drafts, setDrafts] = useState({});
-
-  useEffect(() => {
-    api.get('/campaigns/status').then(setConn).catch(() => {});
-    api.get('/campaigns').then(setRows).catch(() => {});
-  }, []);
 
   async function sync() {
     setBusy(true);
@@ -19,6 +12,7 @@ export default function Campaigns() {
     try {
       const out = await api.post('/campaigns/sync');
       setRows(out.campaigns);
+      onSynced?.();
     } catch (e) {
       setError(e.message);
     } finally {
@@ -49,17 +43,6 @@ export default function Campaigns() {
     }
   }
 
-  const totals = rows.reduce(
-    (a, c) => ({
-      spend: a.spend + Number(c.spend || 0),
-      leads: a.leads + Number(c.leads_count || 0),
-      clicks: a.clicks + Number(c.clicks || 0),
-      active: a.active + (c.status === 'ACTIVE' ? 1 : 0)
-    }),
-    { spend: 0, leads: 0, clicks: 0, active: 0 }
-  );
-  const cpl = totals.leads ? totals.spend / totals.leads : 0;
-
   return (
     <>
       {!conn.connected && (
@@ -68,13 +51,6 @@ export default function Campaigns() {
         </div>
       )}
       {error && <div className="notice bad">{error}</div>}
-
-      <div className="stats">
-        <div className="stat"><div className="k">Spend · 30d</div><div className="v num">{money(totals.spend)}</div></div>
-        <div className="stat"><div className="k">Leads</div><div className="v num">{money(totals.leads)}</div></div>
-        <div className="stat"><div className="k">Cost per lead</div><div className="v num">{cpl ? money(cpl) : '—'}</div></div>
-        <div className="stat"><div className="k">Running</div><div className="v num">{totals.active}/{rows.length}</div></div>
-      </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center' }}>
         <button className="btn primary" onClick={sync} disabled={busy || !conn.connected}>
@@ -95,13 +71,12 @@ export default function Campaigns() {
               <tr>
                 <th>Campaign</th>
                 <th>Status</th>
-                <th>Daily budget</th>
-                <th>Spend</th>
-                <th>Leads</th>
-                <th>CPL</th>
-                <th>CTR</th>
-                <th>Clicks</th>
-                <th></th>
+                <th style={{ textAlign: 'right' }}>Daily budget</th>
+                <th style={{ textAlign: 'right' }}>Spend</th>
+                <th style={{ textAlign: 'right' }}>Leads</th>
+                <th style={{ textAlign: 'right' }}>CPL</th>
+                <th style={{ textAlign: 'right' }}>CTR</th>
+                <th style={{ textAlign: 'right' }}>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -109,12 +84,12 @@ export default function Campaigns() {
                 <tr key={c.id}>
                   <td>
                     <div className="name">{c.name}</div>
-                    <div className="num" style={{ fontSize: 11, color: 'var(--muted)' }}>{c.objective || '—'}</div>
+                    <div className="num" style={{ fontSize: 10.5, color: 'var(--muted-2)', marginTop: 2 }}>{c.id}</div>
                   </td>
                   <td>
                     <span className={`tag ${c.status === 'ACTIVE' ? 'good' : 'off'}`}>{c.status || '—'}</span>
                   </td>
-                  <td>
+                  <td style={{ textAlign: 'right' }}>
                     <input
                       className="input budget-input num"
                       type="number"
@@ -126,12 +101,11 @@ export default function Campaigns() {
                       placeholder="—"
                     />
                   </td>
-                  <td className="num">{money(c.spend)}</td>
-                  <td className="num">{money(c.leads_count)}</td>
-                  <td className="num">{Number(c.cpl) ? money(c.cpl) : '—'}</td>
-                  <td className="num">{Number(c.ctr).toFixed(2)}%</td>
-                  <td className="num">{money(c.clicks)}</td>
-                  <td>
+                  <td className="num" style={{ textAlign: 'right' }}>{money(c.spend)}</td>
+                  <td className="num" style={{ textAlign: 'right' }}>{money(c.leads_count)}</td>
+                  <td className="num" style={{ textAlign: 'right' }}>{Number(c.cpl) ? money(c.cpl) : '—'}</td>
+                  <td className="num" style={{ textAlign: 'right' }}>{Number(c.ctr).toFixed(2)}%</td>
+                  <td style={{ textAlign: 'right' }}>
                     <button className="btn sm" onClick={() => toggle(c)}>
                       {c.status === 'ACTIVE' ? 'Pause' : 'Resume'}
                     </button>
@@ -140,6 +114,10 @@ export default function Campaigns() {
               ))}
             </tbody>
           </table>
+          <div className="table-foot">
+            <span>SYNCED FROM META MARKETING API · EVERY 10 MIN</span>
+            {rows[0]?.synced_at && <span style={{ marginLeft: 'auto' }}>{when(rows[0].synced_at)}</span>}
+          </div>
         </div>
       )}
     </>

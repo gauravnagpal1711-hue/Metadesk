@@ -1,5 +1,5 @@
 import express from 'express';
-import { q } from '../db.js';
+import { q, getSetting, setSetting } from '../db.js';
 import { cloudConfigured, parseWebhook } from '../services/whatsappCloud.js';
 import { startWeb, logoutWeb, webStatus, onWebMessage } from '../services/whatsappWeb.js';
 import { normalisePhone } from '../services/meta.js';
@@ -70,6 +70,25 @@ webhookPath: '/api/whatsapp/webhook'
 },
 web: webStatus()
 });
+});
+
+// Only message existing leads: persisted here, enforced in ingestIncoming in a later phase.
+whatsappRouter.get('/settings', async (req, res, next) => {
+try {
+res.json({ onlyExistingLeads: await getSetting('wa_only_existing_leads', false) });
+} catch (e) {
+next(e);
+}
+});
+
+whatsappRouter.patch('/settings', async (req, res, next) => {
+try {
+const { onlyExistingLeads } = req.body || {};
+await setSetting('wa_only_existing_leads', !!onlyExistingLeads);
+res.json({ onlyExistingLeads: !!onlyExistingLeads });
+} catch (e) {
+next(e);
+}
 });
 
 /** Start pairing — poll /status until it flips to connected. */

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 
-export default function Facebook() {
+export default function Facebook({ onConnectionChange }) {
   const [status, setStatus] = useState(null);
   const [options, setOptions] = useState(null);
   const [adAccountId, setAdAccountId] = useState('');
@@ -19,14 +19,14 @@ export default function Facebook() {
         const opts = await api.get('/facebook/accounts').catch(() => null);
         setOptions(opts);
       }
+      onConnectionChange?.();
     } catch (e) {
       setError(e.message);
     }
-  }, []);
+  }, [onConnectionChange]);
 
   useEffect(() => {
     refresh();
-    // When the popup finishes it posts a message; refresh then.
     const onMsg = (e) => { if (e.data === 'fb-connected') refresh(); };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
@@ -38,7 +38,6 @@ export default function Facebook() {
     try {
       const { url } = await api.get('/facebook/connect');
       const popup = window.open(url, 'fb-login', 'width=640,height=720');
-      // Fallback: poll in case the popup is blocked and it navigates in place.
       const timer = setInterval(async () => {
         if (popup && popup.closed) {
           clearInterval(timer);
@@ -96,36 +95,59 @@ export default function Facebook() {
 
       <div className="grid2">
         <div className="card">
-          <h2 style={{ fontFamily: 'var(--display)', fontSize: 16, margin: '0 0 4px' }}>Connect Facebook</h2>
-          <p style={{ color: 'var(--muted)', marginTop: 0 }}>
-            Sign in once. Ads Desk then pulls your campaigns and lead-form leads automatically, and keeps them
-            in sync every few minutes.
-          </p>
-
-          <div style={{ marginBottom: 14 }}>
-            <span className={`tag ${connected ? 'good' : 'off'}`}>{connected ? 'signed in' : 'not connected'}</span>
-            {conn.name && <span className="num" style={{ marginLeft: 8 }}>{conn.name}</span>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              width: 34, height: 34, borderRadius: 8, background: 'var(--accent-soft)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 600, color: 'var(--accent)'
+            }}>f</div>
+            <div>
+              <div style={{ fontSize: 13.5, fontWeight: 600 }}>{connected ? `Signed in${conn.name ? ` as ${conn.name}` : ''}` : 'Not signed in'}</div>
+              <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+                {connected ? 'Token connected' : 'Sign in to sync campaigns and leads'}
+              </div>
+            </div>
+            <span className={`pill-status ${connected ? 'good' : ''}`} style={{ marginLeft: 'auto' }}>
+              <span className="dot" />{connected ? 'Connected' : 'Not connected'}
+            </span>
           </div>
 
-          {!connected ? (
-            <button className="btn primary" onClick={connect} disabled={busy === 'connect' || !status.oauthConfigured}>
-              {busy === 'connect' ? 'Opening Facebook…' : 'Continue with Facebook'}
-            </button>
-          ) : (
-            <button className="btn danger" onClick={disconnect} disabled={busy === 'disconnect'}>
-              Disconnect
-            </button>
+          {connected && (
+            <div className="kv-rows">
+              <div className="row">
+                <span className="k">Ad account</span>
+                <span className="v">{options?.adAccounts.find((a) => a.account_id === conn.adAccountId)?.name || conn.adAccountId || '—'}</span>
+                {conn.adAccountId && <span className="id">{conn.adAccountId}</span>}
+              </div>
+              <div className="row">
+                <span className="k">Page</span>
+                <span className="v">{options?.pages.find((p) => p.id === conn.pageId)?.name || conn.pageId || '—'}</span>
+                {conn.pageId && <span className="id">{conn.pageId}</span>}
+              </div>
+            </div>
           )}
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+            {!connected ? (
+              <button className="btn primary" onClick={connect} disabled={busy === 'connect' || !status.oauthConfigured}>
+                {busy === 'connect' ? 'Opening Facebook…' : 'Continue with Facebook'}
+              </button>
+            ) : (
+              <button className="btn danger" onClick={disconnect} disabled={busy === 'disconnect'}>
+                Disconnect
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="card">
-          <h2 style={{ fontFamily: 'var(--display)', fontSize: 16, margin: '0 0 4px' }}>Choose account & page</h2>
-          <p style={{ color: 'var(--muted)', marginTop: 0 }}>
+          <h2>Choose account & page</h2>
+          <p style={{ color: 'var(--muted)', marginTop: 0, fontSize: 13 }}>
             Pick which ad account to manage and which page's lead forms to pull from.
           </p>
 
           {!connected ? (
-            <div className="empty" style={{ padding: '24px' }}>Sign in first, then choose here.</div>
+            <div className="empty" style={{ padding: 24 }}>Sign in first, then choose here.</div>
           ) : !options ? (
             <div style={{ color: 'var(--muted)' }}>Loading your accounts…</div>
           ) : (
