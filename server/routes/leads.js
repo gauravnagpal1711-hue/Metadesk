@@ -1,8 +1,8 @@
 import express from 'express';
 import { q } from '../db.js';
 import { listLeadForms, fetchFormLeads, flattenLead, normalisePhone, metaConfigured } from '../services/meta.js';
-import { sendText, cloudConfigured } from '../services/whatsappCloud.js';
-import { sendWebText, webStatus } from '../services/whatsappWeb.js';
+import { sendText, sendMedia, cloudConfigured } from '../services/whatsappCloud.js';
+import { sendWebText, sendWebMedia, webStatus } from '../services/whatsappWeb.js';
 
 export const leadsRouter = express.Router();
 
@@ -206,8 +206,8 @@ leadsRouter.delete('/:leadId/remarks/:remarkId', async (req, res, next) => {
 
 leadsRouter.post('/:id/messages', async (req, res, next) => {
   try {
-    const { body } = req.body || {};
-    if (!body) return res.status(400).json({ error: 'Empty message.' });
+    const { body, mediaData, mediaMime, fileName } = req.body || {};
+    if (!body && !mediaData) return res.status(400).json({ error: 'Empty message.' });
     const { rows: lead } = await q('SELECT * FROM leads WHERE id=$1', [req.params.id]);
     if (!lead.length) return res.status(404).json({ error: 'Lead not found.' });
 
@@ -217,7 +217,15 @@ leadsRouter.post('/:id/messages', async (req, res, next) => {
     let waMessageId = null;
     try {
       const phone = lead[0].phone;
-      if (cloudConfigured()) {
+      if (mediaData) {
+        const opts = { mediaData, mimeType: mediaMime, caption: body || undefined, fileName };
+        const sent = cloudConfigured()
+          ? await sendMedia(phone, opts)
+          : webStatus().status === 'connected'
+            ? await sendWebMedia(phone, opts)
+            : null;
+        waMessageId = sent?.id || null;
+      } else if (cloudConfigured()) {
         const sent = await sendText(phone, body);
         waMessageId = sent?.id || null;
       } else if (webStatus().status === 'connected') {
@@ -229,8 +237,8 @@ leadsRouter.post('/:id/messages', async (req, res, next) => {
     }
 
     const { rows } = await q(
-      'INSERT INTO messages (lead_id, direction, channel, body, wa_message_id) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-      [req.params.id, 'out', 'whatsapp', body, waMessageId]
+      'INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, media_data, media_mime) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [req.params.id, 'out', 'whatsapp', body || null, waMessageId, mediaData || null, mediaMime || null]
     );
 
     res.json(rows[0]);

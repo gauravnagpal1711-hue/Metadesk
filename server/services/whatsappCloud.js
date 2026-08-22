@@ -3,6 +3,7 @@
  * Needs WA_PHONE_NUMBER_ID, WA_TOKEN and WA_VERIFY_TOKEN.
  */
 const VERSION = process.env.META_API_VERSION || 'v21.0';
+const MAX_MEDIA_BYTES = 15 * 1024 * 1024; // keep base64 rows in Postgres reasonable
 
 export function cloudConfigured() {
   return Boolean(process.env.WA_PHONE_NUMBER_ID && process.env.WA_TOKEN);
@@ -20,7 +21,7 @@ export async function sendText(to, body) {
       messaging_product: 'whatsapp',
       to,
       type: 'text',
-      text: { preview_url: false, body }
+      text: { preview_url: true, body }
     })
   });
   const json = await res.json();
@@ -28,7 +29,70 @@ export async function sendText(to, body) {
   return { id: json.messages?.[0]?.id };
 }
 
-/** Flatten a webhook payload into [{ from, name, body, wa_message_id, ts }]. */
+const KIND_BY_MIME = (mime) => {
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  return 'document';
+};
+
+/** mediaData is a base64 data URL. Uploads to Meta first, then sends by the returned media id. */
+export async function sendMedia(to, { mediaData, mimeType, caption, fileName }) {
+  if (!cloudConfigured()) throw new Error('WhatsApp Cloud API is not connected.');
+  const match = /^data:([^;]+);base64,(.*)$/.exec(mediaData || '');
+  if (!match) throw new Error('mediaData must be a base64 data URL.');
+  const mimetype = mimeType || match[1];
+  const buffer = Buffer.from(match[2], 'base64');
+  const kind = KIND_BY_MIME(mimetype);
+
+  const form = new FormData();
+  form.append('messaging_product', 'whatsapp');
+  form.append('type', mimetype);
+  form.append('file', new Blob([buffer], { type: mimetype }), fileName || `upload.${mimetype.split('/')[1] || 'bin'}`);
+
+  const uploadRes = await fetch(`https://graph.facebook.com/${VERSION}/${process.env.WA_PHONE_NUMBER_ID}/media`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.WA_TOKEN}` },
+    body: form
+  });
+  const uploadJson = await uploadRes.json();
+  if (!uploadRes.ok) throw new Error(uploadJson?.error?.message || 'WhatsApp media upload failed.');
+
+  const body = {
+    messaging_product: 'whatsapp',
+    to,
+    type: kind,
+    [kind]: { id: uploadJson.id, ...(kind === 'document' ? { filename: fileName || 'file', caption } : { caption }) }
+  };
+  const sendRes = await fetch(`https://graph.facebook.com/${VERSION}/${process.env.WA_PHONE_NUMBER_ID}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.WA_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const sendJson = await sendRes.json();
+  if (!sendRes.ok) throw new Error(sendJson?.error?.message || 'WhatsApp send failed.');
+  return { id: sendJson.messages?.[0]?.id };
+}
+
+/** Fetches a received media item by its Graph API media id and returns it as a base64 data URL. */
+export async function downloadCloudMedia(mediaId) {
+  const infoRes = await fetch(`https://graph.facebook.com/${VERSION}/${mediaId}`, {
+    headers: { Authorization: `Bearer ${process.env.WA_TOKEN}` }
+  });
+  const info = await infoRes.json();
+  if (!infoRes.ok || !info.url) throw new Error(info?.error?.message || 'Could not resolve media URL.');
+  if (info.file_size && Number(info.file_size) > MAX_MEDIA_BYTES) return null;
+
+  const fileRes = await fetch(info.url, { headers: { Authorization: `Bearer ${process.env.WA_TOKEN}` } });
+  if (!fileRes.ok) throw new Error('Could not download media file.');
+  const buffer = Buffer.from(await fileRes.arrayBuffer());
+  const mimetype = info.mime_type || 'application/octet-stream';
+  return { media_data: `data:${mimetype};base64,${buffer.toString('base64')}`, media_mime: mimetype };
+}
+
+const MEDIA_TYPES = ['image', 'video', 'audio', 'document', 'sticker'];
+
+/** Flatten a webhook payload into [{ from, name, body, wa_message_id, ts, media }]. `media` (if present) is { id, mime_type } — fetch it separately with downloadCloudMedia(). */
 export function parseWebhook(payload) {
   const out = [];
   for (const entry of payload?.entry || []) {
@@ -37,12 +101,14 @@ export function parseWebhook(payload) {
       const contacts = value.contacts || [];
       for (const msg of value.messages || []) {
         const contact = contacts.find((c) => c.wa_id === msg.from);
+        const mediaType = MEDIA_TYPES.find((t) => msg[t]);
         out.push({
           from: msg.from,
           name: contact?.profile?.name || null,
-          body: msg.text?.body || msg.button?.text || `[${msg.type}]`,
+          body: msg.text?.body || msg.button?.text || (mediaType ? msg[mediaType]?.caption || null : `[${msg.type}]`),
           wa_message_id: msg.id,
-          ts: msg.timestamp ? new Date(Number(msg.timestamp) * 1000) : new Date()
+          ts: msg.timestamp ? new Date(Number(msg.timestamp) * 1000) : new Date(),
+          media: mediaType ? { id: msg[mediaType].id, mime_type: msg[mediaType].mime_type } : null
         });
       }
     }

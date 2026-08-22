@@ -1,6 +1,6 @@
 import express from 'express';
 import { q, getSetting, setSetting } from '../db.js';
-import { cloudConfigured, parseWebhook } from '../services/whatsappCloud.js';
+import { cloudConfigured, parseWebhook, downloadCloudMedia } from '../services/whatsappCloud.js';
 import { startWeb, logoutWeb, webStatus, onWebMessage, onHistorySync } from '../services/whatsappWeb.js';
 import { normalisePhone } from '../services/meta.js';
 
@@ -33,7 +33,7 @@ async function alreadyStored(wa_message_id) {
 * Only stores messages for Meta-verified leads.
 * Shared by both the Cloud API webhook and the WhatsApp Web listener.
 */
-export async function ingestIncoming({ from, name, body, wa_message_id, ts, fromMe }) {
+export async function ingestIncoming({ from, name, body, wa_message_id, ts, fromMe, media_data, media_mime }) {
 const phone = normalisePhone(from);
 let { rows } = await q('SELECT * FROM leads WHERE phone = $1 ORDER BY created_at ASC LIMIT 1', [phone]);
 let lead = rows[0];
@@ -44,9 +44,9 @@ if (fromMe) {
   if (!lead || !lead.is_meta_verified) return lead || null;
   if (await alreadyStored(wa_message_id)) return lead;
   await q(
-    `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, created_at)
-    VALUES ($1,'out','whatsapp',$2,$3,$4)`,
-    [lead.id, body, wa_message_id, ts || new Date()]
+    `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, media_data, media_mime, created_at)
+    VALUES ($1,'out','whatsapp',$2,$3,$4,$5,$6)`,
+    [lead.id, body, wa_message_id, media_data || null, media_mime || null, ts || new Date()]
   );
   return lead;
 }
@@ -87,9 +87,9 @@ if (!lead) {
 if (lead.is_meta_verified) {
   if (await alreadyStored(wa_message_id)) return lead;
   await q(
-    `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, created_at)
-    VALUES ($1,'in','whatsapp',$2,$3,$4)`,
-    [lead.id, body, wa_message_id, ts || new Date()]
+    `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, media_data, media_mime, created_at)
+    VALUES ($1,'in','whatsapp',$2,$3,$4,$5,$6)`,
+    [lead.id, body, wa_message_id, media_data || null, media_mime || null, ts || new Date()]
   );
   await q('UPDATE leads SET wants_whatsapp = true, updated_at = now() WHERE id = $1', [lead.id]);
   console.log(`[WhatsApp] Message attached to verified lead ${lead.id}`);
@@ -131,9 +131,9 @@ async function ingestHistoryBatch(items) {
       if (!lead || !lead.is_meta_verified) continue;
       if (await alreadyStored(item.wa_message_id)) continue;
       await q(
-        `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, created_at)
-        VALUES ($1,$2,'whatsapp',$3,$4,$5)`,
-        [lead.id, item.fromMe ? 'out' : 'in', item.body, item.wa_message_id, item.ts]
+        `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, media_data, media_mime, created_at)
+        VALUES ($1,$2,'whatsapp',$3,$4,$5,$6,$7)`,
+        [lead.id, item.fromMe ? 'out' : 'in', item.body, item.wa_message_id, item.media_data || null, item.media_mime || null, item.ts]
       );
       attached++;
     } catch (e) {
@@ -216,7 +216,15 @@ whatsappRouter.post('/webhook', async (req, res) => {
 res.sendStatus(200); // acknowledge fast, then process
 try {
 for (const msg of parseWebhook(req.body)) {
-await ingestIncoming(msg);
+  if (msg.media?.id) {
+    try {
+      const downloaded = await downloadCloudMedia(msg.media.id);
+      if (downloaded) Object.assign(msg, downloaded);
+    } catch (e) {
+      console.error('WhatsApp Cloud media download failed:', e.message);
+    }
+  }
+  await ingestIncoming(msg);
 }
 } catch (e) {
 console.error('Webhook processing failed:', e.message);

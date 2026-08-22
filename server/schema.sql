@@ -72,8 +72,13 @@ direction TEXT NOT NULL, -- in | out
 channel TEXT NOT NULL DEFAULT 'whatsapp',
 body TEXT,
 wa_message_id TEXT,
+media_data TEXT, -- base64 data URL
+media_mime TEXT,
 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_data TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_mime TEXT;
 
 CREATE INDEX IF NOT EXISTS messages_lead_idx ON messages(lead_id, created_at);
 

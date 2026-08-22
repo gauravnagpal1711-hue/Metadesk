@@ -1,14 +1,45 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, when } from '../api.js';
 
+const URL_RE = /(https?:\/\/[^\s]+)/g;
+
+/** Renders text with any http(s) URLs turned into clickable links. */
+function Linkified({ text }) {
+  if (!text) return null;
+  const parts = String(text).split(URL_RE);
+  return parts.map((part, i) =>
+    URL_RE.test(part) ? (
+      <a key={i} href={part} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+        {part}
+      </a>
+    ) : (
+      <span key={i}>{part}</span>
+    )
+  );
+}
+
+function MessageMedia({ mime, data }) {
+  if (!mime || !data) return null;
+  if (mime.startsWith('image/')) return <img src={data} alt="" style={{ maxWidth: '100%', borderRadius: 8, display: 'block', marginBottom: 6 }} />;
+  if (mime.startsWith('video/')) return <video src={data} controls style={{ maxWidth: '100%', borderRadius: 8, display: 'block', marginBottom: 6 }} />;
+  if (mime.startsWith('audio/')) return <audio src={data} controls style={{ width: '100%', marginBottom: 6 }} />;
+  return (
+    <a href={data} download className="btn sm" style={{ display: 'inline-block', marginBottom: 6 }}>
+      Download file
+    </a>
+  );
+}
+
 export default function LeadDrawer({ leadId, stages, onClose }) {
   const [data, setData] = useState(null);
   const [view, setView] = useState('chat');
   const [draft, setDraft] = useState('');
+  const [attachment, setAttachment] = useState(null); // { dataUrl, mime, name }
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const endRef = useRef(null);
+  const fileRef = useRef(null);
 
   const load = useCallback(async () => {
     setData(await api.get(`/leads/${leadId}`));
@@ -30,18 +61,33 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   const { lead, messages, remarks, activity } = data;
 
   async function send() {
-    if (!draft.trim()) return;
+    if (!draft.trim() && !attachment) return;
     setSending(true);
     setError('');
     try {
-      await api.post(`/leads/${leadId}/messages`, { body: draft.trim() });
+      await api.post(`/leads/${leadId}/messages`, {
+        body: draft.trim() || undefined,
+        mediaData: attachment?.dataUrl,
+        mediaMime: attachment?.mime,
+        fileName: attachment?.name
+      });
       setDraft('');
+      setAttachment(null);
+      if (fileRef.current) fileRef.current.value = '';
       await load();
     } catch (e) {
       setError(e.message);
     } finally {
       setSending(false);
     }
+  }
+
+  function pickFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setAttachment({ dataUrl: reader.result, mime: file.type, name: file.name });
+    reader.onerror = () => setError('Could not read that file.');
+    reader.readAsDataURL(file);
   }
 
   async function addNote() {
@@ -126,7 +172,8 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
               <>
                 {messages.map((m) => (
                   <div key={m.id} className={`bubble ${m.direction === 'out' ? 'out' : 'in'}`}>
-                    <div>{m.body}</div>
+                    <MessageMedia mime={m.media_mime} data={m.media_data} />
+                    {m.body && <div><Linkified text={m.body} /></div>}
                     <div className="t">{new Date(m.created_at).toLocaleString()}</div>
                   </div>
                 ))}
@@ -207,17 +254,36 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
         </div>
 
         {view === 'chat' && (
-          <div className="drawer-foot">
-            <input
-              className="input"
-              placeholder="Reply on WhatsApp"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && send()}
-            />
-            <button className="btn primary" onClick={send} disabled={sending || !draft.trim()}>
-              {sending ? '…' : 'Send'}
-            </button>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {attachment && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderTop: '1px solid var(--line)', background: 'var(--surface-soft)' }}>
+                {attachment.mime.startsWith('image/') ? (
+                  <img src={attachment.dataUrl} alt="" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 6 }} />
+                ) : (
+                  <span className="tag off">{attachment.mime.split('/')[0] || 'file'}</span>
+                )}
+                <span style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{attachment.name}</span>
+                <button className="btn ghost sm" style={{ marginLeft: 'auto' }} onClick={() => { setAttachment(null); if (fileRef.current) fileRef.current.value = ''; }}>
+                  Remove
+                </button>
+              </div>
+            )}
+            <div className="drawer-foot">
+              <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files?.[0])} />
+              <button className="btn" onClick={() => fileRef.current?.click()} aria-label="Attach file" title="Attach file">
+                📎
+              </button>
+              <input
+                className="input"
+                placeholder="Reply on WhatsApp"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && send()}
+              />
+              <button className="btn primary" onClick={send} disabled={sending || (!draft.trim() && !attachment)}>
+                {sending ? '…' : 'Send'}
+              </button>
+            </div>
           </div>
         )}
       </aside>

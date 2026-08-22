@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const SESSION_DIR = process.env.WA_SESSION_DIR || '/data/wa-session';
+const MAX_MEDIA_BYTES = 15 * 1024 * 1024; // keep base64 rows in Postgres reasonable
 
 const state = {
         status: 'disconnected', // disconnected | pairing | connected | error
@@ -21,6 +22,9 @@ const state = {
         sock: null,
         starting: false
 };
+
+// Set once Baileys is dynamically imported in startWeb() — extractMessage() needs it.
+let downloadMediaMessageFn = null;
 
 let onIncoming = async () => {};
 export function onWebMessage(handler) {
@@ -75,8 +79,27 @@ function extractBody(rawMessage) {
                 );
 }
 
+const MEDIA_KEYS = ['imageMessage', 'videoMessage', 'documentMessage', 'audioMessage', 'stickerMessage'];
+
+/** Download and base64-encode any media attached to the (unwrapped) message. Returns null if none, or on failure. */
+async function extractMedia(rawMessage, fullMessage) {
+        const msg = unwrapMessage(rawMessage);
+        const key = MEDIA_KEYS.find((k) => msg[k]);
+        if (!key || !downloadMediaMessageFn) return null;
+
+  const mimetype = msg[key].mimetype || 'application/octet-stream';
+        try {
+                  const buffer = await downloadMediaMessageFn(fullMessage, 'buffer', {});
+                  if (!buffer || buffer.length > MAX_MEDIA_BYTES) return null;
+                  return { media_data: `data:${mimetype};base64,${buffer.toString('base64')}`, media_mime: mimetype };
+        } catch (e) {
+                  console.warn('WhatsApp media download failed:', e.message);
+                  return null;
+        }
+}
+
 /** Shared shape-normalizer for both live messages and history-sync messages. Returns null to skip. */
-function extractMessage(m) {
+async function extractMessage(m) {
         const jid = m.key.remoteJid || '';
         if (jid.endsWith('@g.us')) return null; // skip groups
 
@@ -95,13 +118,16 @@ function extractMessage(m) {
         if (msgKeys.length === 0) return null; // undecryptable / no content
 
   const body = extractBody(m.message || {});
+        const media = await extractMedia(m.message || {}, m);
         return {
                   from,
                   name: m.pushName || null,
-                  body: body || '[media]',
+                  body: body || (media ? null : '[media]'),
                   wa_message_id: m.key.id,
                   ts: new Date(Number(m.messageTimestamp) * 1000),
-                  fromMe: !!m.key.fromMe
+                  fromMe: !!m.key.fromMe,
+                  media_data: media?.media_data || null,
+                  media_mime: media?.media_mime || null
         };
 }
 
@@ -123,7 +149,8 @@ export async function startWeb() {
         }
 
   const makeWASocket = baileys.default || baileys.makeWASocket;
-        const { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = baileys;
+        const { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, downloadMediaMessage } = baileys;
+        downloadMediaMessageFn = downloadMediaMessage;
 
   let sock;
         try {
@@ -170,7 +197,7 @@ export async function startWeb() {
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
             if (type !== 'notify') return;
             for (const m of messages) {
-                        const extracted = extractMessage(m);
+                        const extracted = await extractMessage(m);
                         if (!extracted) {
                                       console.warn('Skipping WhatsApp message: no phone number or empty/undecryptable payload. key:', JSON.stringify(m.key));
                                       continue;
@@ -181,7 +208,7 @@ export async function startWeb() {
 
   // Delivered once, in batches, right after a fresh QR pairing (syncFullHistory: true above).
   sock.ev.on('messaging-history.set', async ({ messages, isLatest }) => {
-            const batch = (messages || []).map(extractMessage).filter(Boolean);
+            const batch = (await Promise.all((messages || []).map(extractMessage))).filter(Boolean);
             if (batch.length === 0) return;
             console.log(`[WhatsApp] History sync: ${batch.length} messages${isLatest ? ' (final batch)' : ''}`);
             await onHistory(batch).catch((e) => console.error('History sync handler failed:', e.message));
@@ -195,6 +222,25 @@ export async function sendWebText(phone, body) {
         if (state.status !== 'connected' || !state.sock) throw new Error('WhatsApp Web is not connected.');
         const jid = `${String(phone).replace(/\D/g, '')}@s.whatsapp.net`;
         const sent = await state.sock.sendMessage(jid, { text: body });
+        return { id: sent?.key?.id };
+}
+
+/** mediaData is a base64 data URL (data:<mime>;base64,<...>). */
+export async function sendWebMedia(phone, { mediaData, mimeType, caption, fileName }) {
+        if (state.status !== 'connected' || !state.sock) throw new Error('WhatsApp Web is not connected.');
+        const jid = `${String(phone).replace(/\D/g, '')}@s.whatsapp.net`;
+        const match = /^data:([^;]+);base64,(.*)$/.exec(mediaData || '');
+        if (!match) throw new Error('mediaData must be a base64 data URL.');
+        const mimetype = mimeType || match[1];
+        const buffer = Buffer.from(match[2], 'base64');
+
+  let payload;
+        if (mimetype.startsWith('image/')) payload = { image: buffer, caption, mimetype };
+        else if (mimetype.startsWith('video/')) payload = { video: buffer, caption, mimetype };
+        else if (mimetype.startsWith('audio/')) payload = { audio: buffer, mimetype };
+        else payload = { document: buffer, mimetype, fileName: fileName || 'file', caption };
+
+  const sent = await state.sock.sendMessage(jid, payload);
         return { id: sent?.key?.id };
 }
 
