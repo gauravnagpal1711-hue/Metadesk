@@ -80,9 +80,13 @@ function extractMessage(m) {
         const jid = m.key.remoteJid || '';
         if (jid.endsWith('@g.us')) return null; // skip groups
 
+  // Baileys 7 exposes the real phone number for @lid-addressed chats via
+  // remoteJidAlt/participantAlt instead of the old senderPn/participantPn fields.
   const rawFrom =
                   m.key.senderPn ||
                   m.key.participantPn ||
+                  m.key.remoteJidAlt ||
+                  m.key.participantAlt ||
                   (jid.endsWith('@lid') ? null : jid.split('@')[0]);
         const from = rawFrom ? String(rawFrom).replace(/\D/g, '') : '';
         if (!from) return null;

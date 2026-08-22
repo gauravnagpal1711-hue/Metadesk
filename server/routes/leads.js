@@ -211,22 +211,27 @@ leadsRouter.post('/:id/messages', async (req, res, next) => {
     const { rows: lead } = await q('SELECT * FROM leads WHERE id=$1', [req.params.id]);
     if (!lead.length) return res.status(404).json({ error: 'Lead not found.' });
 
-    const { rows } = await q(
-      'INSERT INTO messages (lead_id, direction, channel, body) VALUES ($1,$2,$3,$4) RETURNING *',
-      [req.params.id, 'out', 'whatsapp', body]
-    );
-
-    // Send via WhatsApp if connected
+    // Send via WhatsApp if connected, capturing the real message id so the
+    // Baileys echo of this same message (fromMe: true) dedups against it
+    // instead of appearing a second time in the conversation.
+    let waMessageId = null;
     try {
       const phone = lead[0].phone;
       if (cloudConfigured()) {
-        await sendText(phone, body);
-      } else if (webStatus().ready) {
-        await sendWebText(phone, body);
+        const sent = await sendText(phone, body);
+        waMessageId = sent?.id || null;
+      } else if (webStatus().status === 'connected') {
+        const sent = await sendWebText(phone, body);
+        waMessageId = sent?.id || null;
       }
     } catch (e) {
       console.error('WhatsApp send failed:', e.message);
     }
+
+    const { rows } = await q(
+      'INSERT INTO messages (lead_id, direction, channel, body, wa_message_id) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [req.params.id, 'out', 'whatsapp', body, waMessageId]
+    );
 
     res.json(rows[0]);
   } catch (e) {
