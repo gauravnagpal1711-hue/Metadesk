@@ -34,6 +34,9 @@ export default function Connect({ onConnectionChange }) {
     setBusy(true);
     setError('');
     try {
+      // Always start from a clean slate — a leftover broken session would
+      // otherwise get silently retried instead of producing a fresh QR.
+      await api.post('/whatsapp/web/logout').catch(() => {});
       await api.post('/whatsapp/web/connect');
       await refresh();
     } catch (e) {

@@ -89,15 +89,23 @@ export async function startWeb() {
   const makeWASocket = baileys.default || baileys.makeWASocket;
         const { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = baileys;
 
-  fs.mkdirSync(SESSION_DIR, { recursive: true });
-        const { state: authState, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
-        const { version } = await fetchLatestBaileysVersion();
+  let sock;
+        try {
+                  fs.mkdirSync(SESSION_DIR, { recursive: true });
+                  const { state: authState, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
+                  const { version } = await fetchLatestBaileysVersion();
 
-  const sock = makeWASocket({ version, auth: authState, printQRInTerminal: false, syncFullHistory: false });
-        state.sock = sock;
-        state.status = 'pairing';
+        sock = makeWASocket({ version, auth: authState, printQRInTerminal: false, syncFullHistory: false });
+                  state.sock = sock;
+                  state.status = 'pairing';
 
-  sock.ev.on('creds.update', saveCreds);
+        sock.ev.on('creds.update', saveCreds);
+        } catch (err) {
+                  state.starting = false;
+                  state.status = 'error';
+                  state.error = `Could not start pairing: ${err.message}`;
+                  return webStatus();
+        }
 
   sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
@@ -175,6 +183,20 @@ export async function sendWebText(phone, body) {
         return { id: sent?.key?.id };
 }
 
+/** Clear every credential file without removing SESSION_DIR itself — on Railway
+ * that path is a volume mount point, and rmSync-ing it outright fails with EBUSY. */
+function clearSessionFiles() {
+        let entries = [];
+        try {
+                  entries = fs.readdirSync(SESSION_DIR);
+        } catch {
+                  return;
+        }
+        for (const entry of entries) {
+                  fs.rmSync(path.join(SESSION_DIR, entry), { recursive: true, force: true });
+        }
+}
+
 export async function logoutWeb() {
         try {
                   await state.sock?.logout();
@@ -185,7 +207,8 @@ export async function logoutWeb() {
         state.status = 'disconnected';
         state.qr = null;
         state.me = null;
-        fs.rmSync(SESSION_DIR, { recursive: true, force: true });
+        state.error = null;
+        clearSessionFiles();
         fs.mkdirSync(SESSION_DIR, { recursive: true });
         return webStatus();
 }
