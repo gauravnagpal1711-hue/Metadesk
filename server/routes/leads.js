@@ -101,13 +101,14 @@ leadsRouter.get('/:id', async (req, res, next) => {
 leadsRouter.post('/', async (req, res, next) => {
   try {
     const { full_name, phone, email, city, stage_id, campaign_name, value } = req.body || {};
+    const normalizedPhone = normalisePhone(phone);
     const { rows: firstStage } = await q('SELECT id FROM stages ORDER BY position LIMIT 1');
     const { rows } = await q(
       `INSERT INTO leads (full_name, phone, email, city, stage_id, campaign_name, value, source, is_meta_verified)
       VALUES ($1,$2,$3,$4,$5,$6,$7,'manual',true) RETURNING *`,
       [
         full_name || 'Unnamed lead',
-        normalisePhone(phone),
+        normalizedPhone,
         email || null,
         city || null,
         stage_id || firstStage[0]?.id,
@@ -115,7 +116,29 @@ leadsRouter.post('/', async (req, res, next) => {
         value || 0
       ]
     );
-    res.json(rows[0]);
+    const lead = rows[0];
+
+    // Any WhatsApp messages that arrived before this number was a known lead were
+    // queued in pending_messages — attach them now so the conversation isn't lost.
+    if (normalizedPhone) {
+      const { rows: pendingMsgs } = await q(
+        `SELECT * FROM pending_messages WHERE phone = $1 ORDER BY created_at ASC`,
+        [normalizedPhone]
+      );
+      if (pendingMsgs.length > 0) {
+        for (const msg of pendingMsgs) {
+          await q(
+            `INSERT INTO messages (lead_id, direction, channel, body, created_at)
+            VALUES ($1, 'in', $2, $3, $4)`,
+            [lead.id, msg.channel, msg.body, msg.created_at]
+          );
+        }
+        await q(`DELETE FROM pending_messages WHERE phone = $1`, [normalizedPhone]);
+        await q('UPDATE leads SET wants_whatsapp = true, updated_at = now() WHERE id = $1', [lead.id]);
+      }
+    }
+
+    res.json(lead);
   } catch (e) {
     next(e);
   }

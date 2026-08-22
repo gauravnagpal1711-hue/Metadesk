@@ -194,7 +194,7 @@ export default function App() {
             <Campaigns rows={campaigns} setRows={setCampaigns} conn={campaignsConn} onSynced={refreshCampaigns} />
           )}
           {tab === 'leads' && (
-            <Leads query={query} onQueryChange={setQuery} onBoardLoaded={onBoardLoaded} syncSignal={syncSignal} />
+            <Leads query={query} onQueryChange={setQuery} onBoardLoaded={onBoardLoaded} syncSignal={syncSignal} campaigns={campaigns} />
           )}
           {tab === 'facebook' && <Facebook onConnectionChange={refreshConnections} />}
           {tab === 'connect' && <Connect onConnectionChange={refreshConnections} />}

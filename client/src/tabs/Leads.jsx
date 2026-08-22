@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, when } from '../api.js';
 import LeadDrawer from '../components/LeadDrawer.jsx';
+import AddLeadModal from '../components/AddLeadModal.jsx';
 
-export default function Leads({ query, onBoardLoaded, syncSignal }) {
+export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = [] }) {
   const [stages, setStages] = useState([]);
   const [leads, setLeads] = useState([]);
   const [dragId, setDragId] = useState(null);
   const [overStage, setOverStage] = useState(null);
   const [openId, setOpenId] = useState(null);
+  const [addOpen, setAddOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -52,12 +54,9 @@ export default function Leads({ query, onBoardLoaded, syncSignal }) {
     }
   }
 
-  async function addLead() {
-    const name = window.prompt('Lead name');
-    if (!name) return;
-    const phone = window.prompt('Phone number (with country code)') || '';
-    const created = await api.post('/leads', { full_name: name, phone });
+  function onLeadCreated(created) {
     setLeads((l) => [created, ...l]);
+    setAddOpen(false);
     setOpenId(created.id);
   }
 
@@ -79,7 +78,7 @@ export default function Leads({ query, onBoardLoaded, syncSignal }) {
           {leads.length} LEADS · {wonCount} WON · {stages.length} STAGES
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <button className="btn" onClick={addLead}>Add lead manually</button>
+          <button className="btn" onClick={() => setAddOpen(true)}>Add lead manually</button>
           <button className="btn primary" onClick={pullFromMeta} disabled={busy}>
             {busy ? 'Pulling…' : 'Pull from Meta'}
           </button>
@@ -145,6 +144,15 @@ export default function Leads({ query, onBoardLoaded, syncSignal }) {
           leadId={openId}
           stages={stages}
           onClose={() => { setOpenId(null); load().catch(() => {}); }}
+        />
+      )}
+
+      {addOpen && (
+        <AddLeadModal
+          stages={stages}
+          campaigns={campaigns}
+          onClose={() => setAddOpen(false)}
+          onCreated={onLeadCreated}
         />
       )}
     </>
