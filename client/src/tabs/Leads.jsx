@@ -3,6 +3,8 @@ import { api, when } from '../api.js';
 import LeadDrawer from '../components/LeadDrawer.jsx';
 import AddLeadModal from '../components/AddLeadModal.jsx';
 import ManageStagesModal from '../components/ManageStagesModal.jsx';
+import CampaignFilter from '../components/CampaignFilter.jsx';
+import StageCampaignSummary from '../components/StageCampaignSummary.jsx';
 
 export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = [] }) {
   const [stages, setStages] = useState([]);
@@ -12,6 +14,7 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
   const [openId, setOpenId] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
   const [stagesOpen, setStagesOpen] = useState(false);
+  const [campaignFilter, setCampaignFilter] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -62,14 +65,14 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
     setOpenId(created.id);
   }
 
+  const distinctCampaigns = [...new Set(leads.map((l) => l.campaign_name).filter(Boolean))].sort();
+
   const term = (query || '').trim().toLowerCase();
-  const visible = term
-    ? leads.filter((l) =>
-        [l.full_name, l.phone, l.email, l.city, l.campaign_name]
-          .filter(Boolean)
-          .some((v) => String(v).toLowerCase().includes(term))
-      )
-    : leads;
+  const visible = leads
+    .filter((l) => !term || [l.full_name, l.phone, l.email, l.city, l.campaign_name]
+      .filter(Boolean)
+      .some((v) => String(v).toLowerCase().includes(term)))
+    .filter((l) => campaignFilter.length === 0 || campaignFilter.includes(l.campaign_name));
 
   const wonCount = leads.filter((l) => stages.find((s) => s.id === l.stage_id)?.is_won).length;
 
@@ -80,6 +83,7 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
           {leads.length} LEADS · {wonCount} WON · {stages.length} STAGES
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <CampaignFilter options={distinctCampaigns} selected={campaignFilter} onChange={setCampaignFilter} />
           <button className="btn" onClick={() => setStagesOpen(true)}>Manage stages</button>
           <button className="btn" onClick={() => setAddOpen(true)}>Add lead manually</button>
           <button className="btn primary" onClick={pullFromMeta} disabled={busy}>
@@ -87,6 +91,8 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
           </button>
         </div>
       </div>
+
+      <StageCampaignSummary stages={stages} leads={visible} onPickCampaign={(name) => setCampaignFilter([name])} />
 
       {error && <div className="notice bad" style={{ margin: '12px 24px 0' }}>{error}</div>}
 
