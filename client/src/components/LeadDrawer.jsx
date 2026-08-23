@@ -81,6 +81,13 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   const { lead, messages, remarks, activity } = data;
 
   const historyRows = [
+    {
+      id: 'created',
+      ts: lead.created_at,
+      dateLabel: new Date(lead.created_at).toLocaleString(),
+      update: 'Lead created',
+      user: lead.source === 'manual' ? 'You' : lead.source === 'whatsapp' ? 'WhatsApp' : lead.source === 'meta' ? 'Meta sync' : 'System'
+    },
     ...remarks.map((r) => ({
       id: `r${r.id}`,
       ts: r.created_at,
