@@ -11,6 +11,7 @@ import { creativesRouter } from './routes/creatives.js';
 import { campaignsRouter } from './routes/campaigns.js';
 import { leadsRouter } from './routes/leads.js';
 import { whatsappRouter } from './routes/whatsapp.js';
+import { reachUsRouter } from './routes/reachUs.js';
 import { facebookRouter, restoreConnection } from './routes/facebook.js';
 import { listCampaigns, listLeadForms, fetchFormLeads, flattenLead, normalisePhone, metaConfigured, getConnection } from './services/meta.js';
 import { startWeb } from './services/whatsappWeb.js';
@@ -41,6 +42,7 @@ app.use('/api/creatives', creativesRouter);
 app.use('/api/campaigns', campaignsRouter);
 app.use('/api/leads', leadsRouter);
 app.use('/api/whatsapp', whatsappRouter);
+app.use('/api/reach-us', reachUsRouter);
 
 // Serve the built React app for every non-API route.
 const clientDist = path.join(__dirname, '..', 'client', 'dist');

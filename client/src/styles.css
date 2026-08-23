@@ -312,6 +312,7 @@ input::placeholder, textarea::placeholder { color: var(--muted-2); }
 }
 .notice strong { color: var(--ink); }
 .notice.bad { border-left-color: var(--danger); }
+.notice.good { border-left-color: var(--good); }
 
 .empty {
   border: 1px dashed var(--line);
