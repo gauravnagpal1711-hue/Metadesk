@@ -10,7 +10,8 @@ export const whatsappRouter = express.Router();
 // ad varies per campaign (it's set in the ad's "message template"), so this is a
 // list, not a single string — editable via /api/whatsapp/settings.
 const DEFAULT_AD_GREETING_PATTERNS = [
-  'I filled in your form and would like to know more about your business'
+  'I filled in your form and would like to know more about your business',
+  'Hello! Can I get more info on this?'
 ];
 
 /** True if the message text looks like a Meta ad-click greeting, not an ordinary reply. */
