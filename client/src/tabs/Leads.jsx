@@ -76,10 +76,17 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
 
   const distinctCampaigns = [...new Set(leads.map((l) => l.campaign_name).filter(Boolean))].sort();
 
+  const FAR_FUTURE = 8640000000000000;
+  function byDateAsc(field) {
+    return (a, b) => (a[field] ? new Date(a[field]).getTime() : FAR_FUTURE) - (b[field] ? new Date(b[field]).getTime() : FAR_FUTURE);
+  }
+
   function sortLeads(list) {
     const sorted = [...list];
     if (sortBy === 'updated') sorted.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
     else if (sortBy === 'name') sorted.sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
+    else if (sortBy === 'followup') sorted.sort(byDateAsc('followup_date'));
+    else if (sortBy === 'appointment') sorted.sort(byDateAsc('appointment_date'));
     else sorted.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     return sorted;
   }
@@ -105,6 +112,8 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
             <option value="created">Sort: Lead date</option>
             <option value="updated">Sort: Update time</option>
             <option value="name">Sort: Name</option>
+            <option value="followup">Sort: Followup date</option>
+            <option value="appointment">Sort: Appointment date</option>
           </select>
           <button className="btn" onClick={() => setStagesOpen(true)}>Manage stages</button>
           <button className="btn" onClick={() => setAddOpen(true)}>Add lead manually</button>
@@ -171,6 +180,11 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
                     {lead.appointment_date && (
                       <div className="appointment-date">
                         📅 {new Date(lead.appointment_date).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    )}
+                    {lead.followup_date && (
+                      <div className="followup-date">
+                        ⏰ {new Date(lead.followup_date).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                       </div>
                     )}
                     <div className="row">

@@ -34,12 +34,13 @@ leadsRouter.post('/stages', async (req, res, next) => {
 
 leadsRouter.patch('/stages/:id', async (req, res, next) => {
   try {
-    const { name, color, position, requires_appointment_date } = req.body || {};
+    const { name, color, position, requires_appointment_date, requires_followup_date } = req.body || {};
     const { rows } = await q(
       `UPDATE stages SET name=COALESCE($2,name), color=COALESCE($3,color), position=COALESCE($4,position),
-      requires_appointment_date=COALESCE($5,requires_appointment_date)
+      requires_appointment_date=COALESCE($5,requires_appointment_date),
+      requires_followup_date=COALESCE($6,requires_followup_date)
       WHERE id=$1 RETURNING *`,
-      [req.params.id, name, color, position, requires_appointment_date]
+      [req.params.id, name, color, position, requires_appointment_date, requires_followup_date]
     );
     res.json(rows[0]);
   } catch (e) {
@@ -205,32 +206,40 @@ leadsRouter.post('/bulk', async (req, res, next) => {
 });
 
 /**
-* Looks up the target stage and, if it requires an appointment date, confirms
-* one is present either in this request or already saved on the lead. Returns
-* { stage } when the move can proceed, or { stage, blocked: message } when it
-* can't — callers should turn `blocked` into a 400 response.
+* Looks up the target stage and, if it requires an appointment and/or followup
+* date, confirms each is present either in this request or already saved on
+* the lead. Returns { stage } when the move can proceed, or
+* { stage, blocked: message } when it can't — callers should turn `blocked`
+* into a 400 response.
 */
-async function checkAppointmentRequirement(leadId, stageId, appointmentDate) {
+async function checkStageDateRequirements(leadId, stageId, { appointment_date, followup_date }) {
   const { rows: stageRow } = await q(
-    'SELECT name, requires_appointment_date FROM stages WHERE id=$1',
+    'SELECT name, requires_appointment_date, requires_followup_date FROM stages WHERE id=$1',
     [stageId]
   );
   const stage = stageRow[0];
-  if (stage?.requires_appointment_date && appointmentDate === undefined) {
-    const { rows: leadRow } = await q('SELECT appointment_date FROM leads WHERE id=$1', [leadId]);
-    if (!leadRow[0]?.appointment_date) {
-      return { stage, blocked: `An appointment date is required to move a lead into "${stage.name}".` };
-    }
+  if (!stage) return { stage };
+
+  const needsAppointment = stage.requires_appointment_date && appointment_date === undefined;
+  const needsFollowup = stage.requires_followup_date && followup_date === undefined;
+  if (!needsAppointment && !needsFollowup) return { stage };
+
+  const { rows: leadRow } = await q('SELECT appointment_date, followup_date FROM leads WHERE id=$1', [leadId]);
+  const missing = [];
+  if (needsAppointment && !leadRow[0]?.appointment_date) missing.push('an appointment date');
+  if (needsFollowup && !leadRow[0]?.followup_date) missing.push('a followup date');
+  if (missing.length) {
+    return { stage, blocked: `${missing.join(' and ').replace(/^a/, 'A')} is required to move a lead into "${stage.name}".` };
   }
   return { stage };
 }
 
 leadsRouter.patch('/:id', async (req, res, next) => {
   try {
-    const { stage_id, full_name, email, city, value, campaign_name, custom_fields, appointment_date } = req.body || {};
+    const { stage_id, full_name, email, city, value, campaign_name, custom_fields, appointment_date, followup_date } = req.body || {};
     let stageName;
     if (stage_id !== undefined) {
-      const check = await checkAppointmentRequirement(req.params.id, stage_id, appointment_date);
+      const check = await checkStageDateRequirements(req.params.id, stage_id, { appointment_date, followup_date });
       if (check.blocked) return res.status(400).json({ error: check.blocked });
       stageName = check.stage?.name;
       await q('INSERT INTO activity (lead_id, kind, detail) VALUES ($1, $2, $3)', [req.params.id, 'moved', `Moved to ${stageName || 'a stage'}`]);
@@ -245,9 +254,10 @@ leadsRouter.patch('/:id', async (req, res, next) => {
       campaign_name=COALESCE($7,campaign_name),
       custom_fields=COALESCE($8,custom_fields),
       appointment_date=COALESCE($9,appointment_date),
+      followup_date=COALESCE($10,followup_date),
       updated_at=now()
       WHERE id=$1 RETURNING *`,
-      [req.params.id, stage_id, full_name, email, city, value, campaign_name, custom_fields !== undefined ? JSON.stringify(custom_fields) : undefined, appointment_date]
+      [req.params.id, stage_id, full_name, email, city, value, campaign_name, custom_fields !== undefined ? JSON.stringify(custom_fields) : undefined, appointment_date, followup_date]
     );
     res.json(rows[0]);
   } catch (e) {
@@ -261,14 +271,15 @@ leadsRouter.patch('/:id', async (req, res, next) => {
 // stage_id and does the same thing; this just matches what the client calls.
 leadsRouter.patch('/:id/move', async (req, res, next) => {
   try {
-    const { stage_id, appointment_date } = req.body || {};
+    const { stage_id, appointment_date, followup_date } = req.body || {};
     if (stage_id === undefined) return res.status(400).json({ error: 'stage_id is required.' });
-    const check = await checkAppointmentRequirement(req.params.id, stage_id, appointment_date);
+    const check = await checkStageDateRequirements(req.params.id, stage_id, { appointment_date, followup_date });
     if (check.blocked) return res.status(400).json({ error: check.blocked });
     await q('INSERT INTO activity (lead_id, kind, detail) VALUES ($1, $2, $3)', [req.params.id, 'moved', `Moved to ${check.stage?.name || 'a stage'}`]);
     const { rows } = await q(
-      'UPDATE leads SET stage_id=$2, appointment_date=COALESCE($3,appointment_date), updated_at=now() WHERE id=$1 RETURNING *',
-      [req.params.id, stage_id, appointment_date]
+      `UPDATE leads SET stage_id=$2, appointment_date=COALESCE($3,appointment_date),
+      followup_date=COALESCE($4,followup_date), updated_at=now() WHERE id=$1 RETURNING *`,
+      [req.params.id, stage_id, appointment_date, followup_date]
     );
     if (!rows.length) return res.status(404).json({ error: 'Lead not found.' });
     res.json(rows[0]);

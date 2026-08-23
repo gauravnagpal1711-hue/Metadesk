@@ -143,8 +143,10 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
 
   async function moveTo(stageId) {
     const target = stages.find((s) => s.id === stageId);
-    if (target?.requires_appointment_date && !lead.appointment_date) {
-      setPendingStage({ stageId, date: '' });
+    const needsAppointment = !!target?.requires_appointment_date && !lead.appointment_date;
+    const needsFollowup = !!target?.requires_followup_date && !lead.followup_date;
+    if (needsAppointment || needsFollowup) {
+      setPendingStage({ stageId, needsAppointment, needsFollowup, appointmentDate: '', followupDate: '' });
       return;
     }
     setError('');
@@ -157,13 +159,15 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   }
 
   async function confirmPendingMove() {
-    if (!pendingStage?.date) return;
+    const { stageId, needsAppointment, needsFollowup, appointmentDate, followupDate } = pendingStage || {};
+    if (needsAppointment && !appointmentDate) return;
+    if (needsFollowup && !followupDate) return;
     setError('');
     try {
-      await api.patch(`/leads/${leadId}/move`, {
-        stage_id: pendingStage.stageId,
-        appointment_date: new Date(pendingStage.date).toISOString()
-      });
+      const body = { stage_id: stageId };
+      if (needsAppointment) body.appointment_date = new Date(appointmentDate).toISOString();
+      if (needsFollowup) body.followup_date = new Date(followupDate).toISOString();
+      await api.patch(`/leads/${leadId}/move`, body);
       setPendingStage(null);
       await load();
     } catch (e) {
@@ -180,6 +184,12 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   async function saveAppointmentDate(value) {
     const iso = value ? new Date(value).toISOString() : null;
     await api.patch(`/leads/${leadId}`, { appointment_date: iso });
+    await load();
+  }
+
+  async function saveFollowupDate(value) {
+    const iso = value ? new Date(value).toISOString() : null;
+    await api.patch(`/leads/${leadId}`, { followup_date: iso });
     await load();
   }
 
@@ -246,18 +256,43 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
             ))}
           </div>
           {pendingStage && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-              <span className="mono-label" style={{ flex: '0 0 auto' }}>Appointment date</span>
-              <input
-                type="datetime-local"
-                className="input"
-                value={pendingStage.date}
-                onChange={(e) => setPendingStage((p) => ({ ...p, date: e.target.value }))}
-                style={{ flex: 1 }}
-                autoFocus
-              />
-              <button className="btn primary sm" onClick={confirmPendingMove} disabled={!pendingStage.date}>Confirm</button>
-              <button className="btn ghost sm" onClick={() => setPendingStage(null)}>Cancel</button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+              {pendingStage.needsAppointment && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="mono-label" style={{ flex: '0 0 auto' }}>Appointment date</span>
+                  <input
+                    type="datetime-local"
+                    className="input"
+                    value={pendingStage.appointmentDate}
+                    onChange={(e) => setPendingStage((p) => ({ ...p, appointmentDate: e.target.value }))}
+                    style={{ flex: 1 }}
+                    autoFocus
+                  />
+                </div>
+              )}
+              {pendingStage.needsFollowup && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="mono-label" style={{ flex: '0 0 auto' }}>Followup date</span>
+                  <input
+                    type="datetime-local"
+                    className="input"
+                    value={pendingStage.followupDate}
+                    onChange={(e) => setPendingStage((p) => ({ ...p, followupDate: e.target.value }))}
+                    style={{ flex: 1 }}
+                    autoFocus={!pendingStage.needsAppointment}
+                  />
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button
+                  className="btn primary sm"
+                  onClick={confirmPendingMove}
+                  disabled={(pendingStage.needsAppointment && !pendingStage.appointmentDate) || (pendingStage.needsFollowup && !pendingStage.followupDate)}
+                >
+                  Confirm
+                </button>
+                <button className="btn ghost sm" onClick={() => setPendingStage(null)}>Cancel</button>
+              </div>
             </div>
           )}
         </div>
@@ -385,6 +420,17 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
                   className="input"
                   defaultValue={toDatetimeLocal(lead.appointment_date)}
                   onBlur={(e) => saveAppointmentDate(e.target.value)}
+                />
+              </div>
+
+              <div className="field">
+                <label htmlFor="f-followup_date">Followup date</label>
+                <input
+                  id="f-followup_date"
+                  type="datetime-local"
+                  className="input"
+                  defaultValue={toDatetimeLocal(lead.followup_date)}
+                  onBlur={(e) => saveFollowupDate(e.target.value)}
                 />
               </div>
 

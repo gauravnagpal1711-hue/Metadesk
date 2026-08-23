@@ -20,6 +20,7 @@ export const q = (text, params) => pool.query(text, params);
 const DEFAULT_STAGES = [
   { name: 'New lead', color: '#2B3AF0' },
   { name: 'Contacted', color: '#6B4BE8' },
+  { name: 'Followup', color: '#1877f2', requires_followup_date: true },
   { name: 'Appointment Book', color: '#0E7C5A', requires_appointment_date: true },
   { name: 'Interested', color: '#B8860F' },
   { name: 'Won', color: '#0E7C5A', is_won: true },
@@ -35,8 +36,9 @@ export async function initDb() {
     let position = 0;
     for (const stage of DEFAULT_STAGES) {
       await q(
-        'INSERT INTO stages (name, position, color, is_won, is_lost, requires_appointment_date) VALUES ($1,$2,$3,$4,$5,$6)',
-        [stage.name, position++, stage.color, !!stage.is_won, !!stage.is_lost, !!stage.requires_appointment_date]
+        `INSERT INTO stages (name, position, color, is_won, is_lost, requires_appointment_date, requires_followup_date)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [stage.name, position++, stage.color, !!stage.is_won, !!stage.is_lost, !!stage.requires_appointment_date, !!stage.requires_followup_date]
       );
     }
     console.log('Seeded default funnel stages.');
@@ -49,6 +51,31 @@ export async function initDb() {
   if (!migrated) {
     await q(`UPDATE stages SET requires_appointment_date = true WHERE name = 'Appointment Book'`);
     await setSetting('migrated_appointment_flag', true);
+  }
+
+  // One-time creation of a "Followup" stage for installs seeded before it
+  // existed — inserted right before "Appointment Book" so the funnel reads
+  // New lead -> Contacted -> Followup -> Appointment Book -> ... Guarded so
+  // it never re-creates the stage if the user later renames or deletes it.
+  const followupMigrated = await getSetting('migrated_followup_stage', false);
+  if (!followupMigrated) {
+    const { rows: existing } = await q(`SELECT id FROM stages WHERE name = 'Followup'`);
+    if (existing.length === 0) {
+      const { rows: apptStage } = await q(`SELECT position FROM stages WHERE name = 'Appointment Book' LIMIT 1`);
+      let insertPosition = apptStage[0]?.position;
+      if (insertPosition === undefined) {
+        const { rows: max } = await q('SELECT COALESCE(MAX(position),-1)+1 AS p FROM stages');
+        insertPosition = max[0].p;
+      } else {
+        await q('UPDATE stages SET position = position + 1 WHERE position >= $1', [insertPosition]);
+      }
+      await q(
+        `INSERT INTO stages (name, position, color, requires_followup_date) VALUES ($1,$2,$3,true)`,
+        ['Followup', insertPosition, '#1877f2']
+      );
+      console.log('Created "Followup" stage.');
+    }
+    await setSetting('migrated_followup_stage', true);
   }
 }
 

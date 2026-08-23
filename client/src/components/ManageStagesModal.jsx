@@ -44,6 +44,15 @@ export default function ManageStagesModal({ stages, onClose, onChanged }) {
     }
   }
 
+  async function toggleRequiresFollowup(stage, checked) {
+    try {
+      await api.patch(`/leads/stages/${stage.id}`, { requires_followup_date: checked });
+      await refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
   async function move(index, dir) {
     const target = index + dir;
     if (target < 0 || target >= rows.length) return;
@@ -121,6 +130,17 @@ export default function ManageStagesModal({ stages, onClose, onChanged }) {
                     onChange={(e) => toggleRequiresAppointment(stage, e.target.checked)}
                   />
                   📅
+                </label>
+                <label
+                  title="Require a followup date to move leads into this stage"
+                  style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: 'var(--muted-2)', flex: '0 0 auto', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!stage.requires_followup_date}
+                    onChange={(e) => toggleRequiresFollowup(stage, e.target.checked)}
+                  />
+                  ⏰
                 </label>
                 {(stage.is_won || stage.is_lost) && (
                   <span className="tag off">{stage.is_won ? 'won' : 'lost'}</span>
