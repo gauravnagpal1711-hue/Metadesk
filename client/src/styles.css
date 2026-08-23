@@ -488,6 +488,15 @@ input::placeholder, textarea::placeholder { color: var(--muted-2); }
 .col-name { font-size: 12.5px; font-weight: 600; letter-spacing: -.005em; }
 .col-count { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--muted); }
 .col-value { font-family: var(--mono); font-size: 9.5px; letter-spacing: .08em; color: var(--muted-2); padding: 0 2px; text-transform: uppercase; }
+.col-sort { display: flex; align-items: center; gap: 5px; padding: 0 2px; }
+.col-sort .select { flex: 1; padding: 4px 6px; font-size: 10.5px; border-radius: 6px; }
+.col-sort .dir-btn {
+  flex: 0 0 auto; width: 24px; height: 24px;
+  border: 1px solid var(--line); border-radius: 6px;
+  background: var(--surface); color: var(--muted-3);
+  font-size: 11px; cursor: pointer;
+}
+.col-sort .dir-btn:hover { color: var(--ink); background: var(--surface-soft); }
 .col-body { display: flex; flex-direction: column; gap: 8px; }
 .col-empty { border-radius: var(--r); padding: 18px 10px; text-align: center; color: var(--muted-2); font-size: 12px; border: 1px dashed var(--line); }
 

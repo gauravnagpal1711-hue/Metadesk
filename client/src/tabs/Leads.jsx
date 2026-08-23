@@ -15,7 +15,7 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
   const [addOpen, setAddOpen] = useState(false);
   const [stagesOpen, setStagesOpen] = useState(false);
   const [campaignFilter, setCampaignFilter] = useState([]);
-  const [sortBy, setSortBy] = useState('created');
+  const [sortState, setSortState] = useState({}); // { [stageId]: { field: 'created'|'updated'|'name'|'followup'|'appointment', dir: 'asc'|'desc' } }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [copiedId, setCopiedId] = useState(null);
@@ -104,18 +104,41 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
 
   const distinctCampaigns = [...new Set(leads.map((l) => l.campaign_name).filter(Boolean))].sort();
 
-  const FAR_FUTURE = 8640000000000000;
-  function byDateAsc(field) {
-    return (a, b) => (a[field] ? new Date(a[field]).getTime() : FAR_FUTURE) - (b[field] ? new Date(b[field]).getTime() : FAR_FUTURE);
+  const DEFAULT_SORT = { field: 'created', dir: 'desc' };
+  const SORT_FIELD_KEYS = { created: 'created_at', updated: 'updated_at', followup: 'followup_date', appointment: 'appointment_date' };
+
+  function getSort(stageId) {
+    return sortState[stageId] || DEFAULT_SORT;
   }
 
-  function sortLeads(list) {
+  function setSortField(stageId, field) {
+    setSortState((s) => ({ ...s, [stageId]: { ...getSort(stageId), field } }));
+  }
+
+  function toggleSortDir(stageId) {
+    setSortState((s) => {
+      const cur = getSort(stageId);
+      return { ...s, [stageId]: { ...cur, dir: cur.dir === 'asc' ? 'desc' : 'asc' } };
+    });
+  }
+
+  function sortLeads(list, stageId) {
+    const { field, dir } = getSort(stageId);
+    const mul = dir === 'desc' ? -1 : 1;
     const sorted = [...list];
-    if (sortBy === 'updated') sorted.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
-    else if (sortBy === 'name') sorted.sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
-    else if (sortBy === 'followup') sorted.sort(byDateAsc('followup_date'));
-    else if (sortBy === 'appointment') sorted.sort(byDateAsc('appointment_date'));
-    else sorted.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    if (field === 'name') {
+      sorted.sort((a, b) => mul * (a.full_name || '').localeCompare(b.full_name || ''));
+    } else {
+      const key = SORT_FIELD_KEYS[field] || 'created_at';
+      sorted.sort((a, b) => {
+        const av = a[key] ? new Date(a[key]).getTime() : null;
+        const bv = b[key] ? new Date(b[key]).getTime() : null;
+        if (av === null && bv === null) return 0;
+        if (av === null) return 1; // undated leads always sort last
+        if (bv === null) return -1;
+        return mul * (av - bv);
+      });
+    }
     return sorted;
   }
 
@@ -136,13 +159,6 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <CampaignFilter options={distinctCampaigns} selected={campaignFilter} onChange={setCampaignFilter} />
-          <select className="select" value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ width: 150 }}>
-            <option value="created">Sort: Lead date</option>
-            <option value="updated">Sort: Update time</option>
-            <option value="name">Sort: Name</option>
-            <option value="followup">Sort: Followup date</option>
-            <option value="appointment">Sort: Appointment date</option>
-          </select>
           <button className="btn" onClick={() => setStagesOpen(true)}>Manage stages</button>
           <button className="btn" onClick={() => setAddOpen(true)}>Add lead manually</button>
           <button className="btn primary" onClick={pullFromMeta} disabled={busy}>
@@ -158,8 +174,9 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
       <div className="board">
         {stages.map((stage) => {
           const stageLeads = leads.filter((l) => l.stage_id === stage.id);
-          const items = sortLeads(visible.filter((l) => l.stage_id === stage.id));
+          const items = sortLeads(visible.filter((l) => l.stage_id === stage.id), stage.id);
           const value = stageLeads.reduce((a, l) => a + Number(l.value || 0), 0);
+          const sort = getSort(stage.id);
           return (
             <section
               key={stage.id}
@@ -175,6 +192,24 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
               </header>
               <div className="col-value">
                 {stage.is_won ? 'PIPELINE CLOSED' : `${items.length} OF ${stageLeads.length} SHOWN`}
+              </div>
+
+              <div className="col-sort">
+                <select className="select" value={sort.field} onChange={(e) => setSortField(stage.id, e.target.value)}>
+                  <option value="name">Name</option>
+                  <option value="created">Created</option>
+                  <option value="updated">Updated</option>
+                  <option value="followup">Followup</option>
+                  <option value="appointment">Appointment</option>
+                </select>
+                <button
+                  className="dir-btn"
+                  onClick={() => toggleSortDir(stage.id)}
+                  title={sort.dir === 'asc' ? 'Ascending — click for descending' : 'Descending — click for ascending'}
+                  aria-label="Toggle sort direction"
+                >
+                  {sort.dir === 'asc' ? '↑' : '↓'}
+                </button>
               </div>
 
               <div className="col-body">
