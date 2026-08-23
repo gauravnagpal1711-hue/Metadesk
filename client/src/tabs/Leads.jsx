@@ -148,6 +148,11 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
                     </div>
                     {lead.phone && <div className="meta">{lead.phone}</div>}
                     {lead.campaign_name && <div className="campaign">{lead.campaign_name}</div>}
+                    {lead.appointment_date && (
+                      <div className="appointment-date">
+                        📅 {new Date(lead.appointment_date).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    )}
                     <div className="row">
                       {lead.message_count > 0 && <span className="tag">{lead.message_count} msg</span>}
                       <span className="tag off">{lead.remark_count || 0} note</span>

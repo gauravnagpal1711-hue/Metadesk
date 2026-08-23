@@ -38,8 +38,11 @@ name TEXT NOT NULL,
 position INTEGER NOT NULL,
 color TEXT NOT NULL DEFAULT '#5B6478',
 is_won BOOLEAN NOT NULL DEFAULT false,
-is_lost BOOLEAN NOT NULL DEFAULT false
+is_lost BOOLEAN NOT NULL DEFAULT false,
+requires_appointment_date BOOLEAN NOT NULL DEFAULT false
 );
+
+ALTER TABLE stages ADD COLUMN IF NOT EXISTS requires_appointment_date BOOLEAN NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS leads (
 id SERIAL PRIMARY KEY,
@@ -59,11 +62,13 @@ board_order INTEGER NOT NULL DEFAULT 0,
 value NUMERIC DEFAULT 0,
 fields JSONB,
 custom_fields JSONB NOT NULL DEFAULT '{}'::jsonb,
+appointment_date TIMESTAMPTZ,
 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS custom_fields JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS appointment_date TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS leads_stage_idx ON leads(stage_id);
 CREATE INDEX IF NOT EXISTS leads_phone_idx ON leads(phone);

@@ -18,6 +18,15 @@ function Linkified({ text }) {
   );
 }
 
+/** Converts a stored ISO timestamp into the "YYYY-MM-DDTHH:mm" shape a
+ * datetime-local input expects, in the viewer's local time. */
+function toDatetimeLocal(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function MessageMedia({ mime, data }) {
   if (!mime || !data) return null;
   if (mime.startsWith('image/')) return <img src={data} alt="" style={{ maxWidth: '100%', borderRadius: 8, display: 'block', marginBottom: 6 }} />;
@@ -39,6 +48,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const [customRows, setCustomRows] = useState([]);
+  const [pendingStage, setPendingStage] = useState(null); // { stageId, date }
   const endRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -124,13 +134,44 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   }
 
   async function moveTo(stageId) {
-    await api.patch(`/leads/${leadId}/move`, { stage_id: stageId });
-    await load();
+    const target = stages.find((s) => s.id === stageId);
+    if (target?.requires_appointment_date && !lead.appointment_date) {
+      setPendingStage({ stageId, date: '' });
+      return;
+    }
+    setError('');
+    try {
+      await api.patch(`/leads/${leadId}/move`, { stage_id: stageId });
+      await load();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function confirmPendingMove() {
+    if (!pendingStage?.date) return;
+    setError('');
+    try {
+      await api.patch(`/leads/${leadId}/move`, {
+        stage_id: pendingStage.stageId,
+        appointment_date: new Date(pendingStage.date).toISOString()
+      });
+      setPendingStage(null);
+      await load();
+    } catch (e) {
+      setError(e.message);
+    }
   }
 
   async function saveField(key, value) {
     if (value === (lead[key] ?? '')) return;
     await api.patch(`/leads/${leadId}`, { [key]: value });
+    await load();
+  }
+
+  async function saveAppointmentDate(value) {
+    const iso = value ? new Date(value).toISOString() : null;
+    await api.patch(`/leads/${leadId}`, { appointment_date: iso });
     await load();
   }
 
@@ -183,6 +224,21 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
               </button>
             ))}
           </div>
+          {pendingStage && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+              <span className="mono-label" style={{ flex: '0 0 auto' }}>Appointment date</span>
+              <input
+                type="datetime-local"
+                className="input"
+                value={pendingStage.date}
+                onChange={(e) => setPendingStage((p) => ({ ...p, date: e.target.value }))}
+                style={{ flex: 1 }}
+                autoFocus
+              />
+              <button className="btn primary sm" onClick={confirmPendingMove} disabled={!pendingStage.date}>Confirm</button>
+              <button className="btn ghost sm" onClick={() => setPendingStage(null)}>Cancel</button>
+            </div>
+          )}
         </div>
 
         <div className="drawer-info">
@@ -299,6 +355,17 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
                   />
                 </div>
               ))}
+
+              <div className="field">
+                <label htmlFor="f-appointment_date">Appointment date</label>
+                <input
+                  id="f-appointment_date"
+                  type="datetime-local"
+                  className="input"
+                  defaultValue={toDatetimeLocal(lead.appointment_date)}
+                  onBlur={(e) => saveAppointmentDate(e.target.value)}
+                />
+              </div>
 
               {lead.fields && Object.keys(lead.fields).length > 0 && (
                 <>
