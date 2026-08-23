@@ -639,10 +639,6 @@ input::placeholder, textarea::placeholder { color: var(--muted-2); }
 .remark { background: var(--surface); border: 1px solid var(--line); border-radius: 9px; padding: 10px 11px; }
 .remark .t { font-family: var(--mono); font-size: 9.5px; color: var(--muted-2); margin-top: 5px; }
 
-.activity-row { display: flex; gap: 9px; align-items: baseline; }
-.activity-row .dot { width: 6px; height: 6px; border-radius: 50%; background: #c4c4c9; margin-top: 6px; flex: 0 0 6px; }
-.activity-row .text { font-size: 13px; color: var(--muted-3); }
-.activity-row .time { margin-left: auto; font-family: var(--mono); font-size: 9.5px; color: var(--muted-2); }
 
 /* ---------- creative studio ---------- */
 

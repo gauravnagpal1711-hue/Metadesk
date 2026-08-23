@@ -207,7 +207,8 @@ leadsRouter.patch('/:id', async (req, res, next) => {
   try {
     const { stage_id, full_name, email, city, value, campaign_name } = req.body || {};
     if (stage_id !== undefined) {
-      await q('INSERT INTO activity (lead_id, kind, detail) VALUES ($1, $2, $3)', [req.params.id, 'moved', `to stage ${stage_id}`]);
+      const { rows: stageRow } = await q('SELECT name FROM stages WHERE id=$1', [stage_id]);
+      await q('INSERT INTO activity (lead_id, kind, detail) VALUES ($1, $2, $3)', [req.params.id, 'moved', `Moved to ${stageRow[0]?.name || 'a stage'}`]);
     }
     const { rows } = await q(
       `UPDATE leads SET
@@ -235,7 +236,8 @@ leadsRouter.patch('/:id/move', async (req, res, next) => {
   try {
     const { stage_id } = req.body || {};
     if (stage_id === undefined) return res.status(400).json({ error: 'stage_id is required.' });
-    await q('INSERT INTO activity (lead_id, kind, detail) VALUES ($1, $2, $3)', [req.params.id, 'moved', `to stage ${stage_id}`]);
+    const { rows: stageRow } = await q('SELECT name FROM stages WHERE id=$1', [stage_id]);
+    await q('INSERT INTO activity (lead_id, kind, detail) VALUES ($1, $2, $3)', [req.params.id, 'moved', `Moved to ${stageRow[0]?.name || 'a stage'}`]);
     const { rows } = await q(
       'UPDATE leads SET stage_id=$2, updated_at=now() WHERE id=$1 RETURNING *',
       [req.params.id, stage_id]

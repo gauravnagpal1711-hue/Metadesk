@@ -60,6 +60,23 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   if (!data) return null;
   const { lead, messages, remarks, activity } = data;
 
+  const historyRows = [
+    ...remarks.map((r) => ({
+      id: `r${r.id}`,
+      ts: r.created_at,
+      dateLabel: r.author === 'upload' ? 'UPLOADED' : new Date(r.created_at).toLocaleString(),
+      update: `Remark added: "${r.body}"`,
+      user: r.author === 'upload' ? 'Upload' : 'You'
+    })),
+    ...activity.map((a) => ({
+      id: `a${a.id}`,
+      ts: a.created_at,
+      dateLabel: new Date(a.created_at).toLocaleString(),
+      update: a.detail,
+      user: a.author === 'upload' ? 'Upload' : 'You'
+    }))
+  ].sort((a, b) => new Date(b.ts) - new Date(a.ts));
+
   async function send() {
     if (!draft.trim() && !attachment) return;
     setSending(true);
@@ -153,7 +170,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
           {[
             ['chat', `Conversation${messages.length ? ` (${messages.length})` : ''}`],
             ['notes', `Remarks${remarks.length ? ` (${remarks.length})` : ''}`],
-            ['log', `Activity${activity.length ? ` (${activity.length})` : ''}`],
+            ['history', `History${historyRows.length ? ` (${historyRows.length})` : ''}`],
             ['details', 'Details']
           ].map(([id, label]) => (
             <button key={id} className={`drawer-tab ${view === id ? 'on' : ''}`} onClick={() => setView(id)}>
@@ -204,17 +221,28 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
             </>
           )}
 
-          {view === 'log' && (
-            activity.length === 0 ? (
-              <div className="empty"><h3>No activity yet</h3>Stage changes and syncs show up here.</div>
+          {view === 'history' && (
+            historyRows.length === 0 ? (
+              <div className="empty"><h3>No history yet</h3>Remarks and stage changes show up here.</div>
             ) : (
-              activity.map((a) => (
-                <div className="activity-row" key={a.id}>
-                  <span className="dot" />
-                  <div className="text">{a.detail}</div>
-                  <span className="time">{when(a.created_at)}</span>
-                </div>
-              ))
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Update</th>
+                    <th>User</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {historyRows.map((h) => (
+                    <tr key={h.id}>
+                      <td style={{ fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--muted-2)', whiteSpace: 'nowrap' }}>{h.dateLabel}</td>
+                      <td>{h.update}</td>
+                      <td>{h.user}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )
           )}
 
