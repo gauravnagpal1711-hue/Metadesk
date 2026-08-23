@@ -162,7 +162,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
           ))}
         </nav>
 
-        <div className="drawer-body">
+        <div className={`drawer-body ${view === 'chat' ? 'wa-chat' : ''}`}>
           {error && <div className="notice bad">{error}</div>}
 
           {view === 'chat' && (
@@ -171,10 +171,12 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
             ) : (
               <>
                 {messages.map((m) => (
-                  <div key={m.id} className={`bubble ${m.direction === 'out' ? 'out' : 'in'}`}>
+                  <div key={m.id} className={`wa-bubble ${m.direction === 'out' ? 'out' : 'in'}`}>
                     <MessageMedia mime={m.media_mime} data={m.media_data} />
-                    {m.body && <div><Linkified text={m.body} /></div>}
-                    <div className="t">{new Date(m.created_at).toLocaleString()}</div>
+                    {m.body && <Linkified text={m.body} />}
+                    <span className="wa-meta">
+                      {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
                   </div>
                 ))}
                 <div ref={endRef} />
@@ -268,20 +270,21 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
                 </button>
               </div>
             )}
-            <div className="drawer-foot">
+            <div className="wa-composer">
               <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files?.[0])} />
-              <button className="btn" onClick={() => fileRef.current?.click()} aria-label="Attach file" title="Attach file">
+              <button className="wa-icon-btn" onClick={() => fileRef.current?.click()} aria-label="Attach file" title="Attach file">
                 📎
               </button>
               <input
                 className="input"
-                placeholder="Reply on WhatsApp"
+                placeholder="Type a message"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && send()}
+                style={{ flex: 1 }}
               />
-              <button className="btn primary" onClick={send} disabled={sending || (!draft.trim() && !attachment)}>
-                {sending ? '…' : 'Send'}
+              <button className="wa-send" onClick={send} disabled={sending || (!draft.trim() && !attachment)} aria-label="Send">
+                {sending ? '…' : '➤'}
               </button>
             </div>
           </div>
