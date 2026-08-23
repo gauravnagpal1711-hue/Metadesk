@@ -156,6 +156,7 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
           campaigns={campaigns}
           onClose={() => setAddOpen(false)}
           onCreated={onLeadCreated}
+          onBulkImported={() => load().catch(() => {})}
         />
       )}
 

@@ -98,47 +98,102 @@ leadsRouter.get('/:id', async (req, res, next) => {
   }
 });
 
+/**
+* Shared by the single-add and bulk-upload routes. Creates a manual lead and
+* attaches any WhatsApp messages already queued in pending_messages for its phone.
+* Set skipIfExists to avoid creating a duplicate when the phone already has a lead
+* (used by bulk upload, where the same person can appear in the sheet more than
+* once, or already be a lead from a prior import).
+*/
+async function createManualLead({ full_name, phone, email, city, stage_id, campaign_name, value }, { skipIfExists = false } = {}) {
+  const normalizedPhone = normalisePhone(phone);
+
+  if (skipIfExists && normalizedPhone) {
+    const { rows: existing } = await q('SELECT id FROM leads WHERE phone = $1 LIMIT 1', [normalizedPhone]);
+    if (existing.length) return { skipped: true, reason: 'A lead with this phone already exists.' };
+  }
+
+  const { rows: firstStage } = await q('SELECT id FROM stages ORDER BY position LIMIT 1');
+  const { rows } = await q(
+    `INSERT INTO leads (full_name, phone, email, city, stage_id, campaign_name, value, source, is_meta_verified)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,'manual',true) RETURNING *`,
+    [
+      full_name || 'Unnamed lead',
+      normalizedPhone,
+      email || null,
+      city || null,
+      stage_id || firstStage[0]?.id,
+      campaign_name || null,
+      value || 0
+    ]
+  );
+  const lead = rows[0];
+
+  // Any WhatsApp messages that arrived before this number was a known lead were
+  // queued in pending_messages — attach them now so the conversation isn't lost.
+  if (normalizedPhone) {
+    const { rows: pendingMsgs } = await q(
+      `SELECT * FROM pending_messages WHERE phone = $1 ORDER BY created_at ASC`,
+      [normalizedPhone]
+    );
+    if (pendingMsgs.length > 0) {
+      for (const msg of pendingMsgs) {
+        await q(
+          `INSERT INTO messages (lead_id, direction, channel, body, created_at)
+          VALUES ($1, 'in', $2, $3, $4)`,
+          [lead.id, msg.channel, msg.body, msg.created_at]
+        );
+      }
+      await q(`DELETE FROM pending_messages WHERE phone = $1`, [normalizedPhone]);
+      await q('UPDATE leads SET wants_whatsapp = true, updated_at = now() WHERE id = $1', [lead.id]);
+    }
+  }
+
+  return { lead };
+}
+
 leadsRouter.post('/', async (req, res, next) => {
   try {
-    const { full_name, phone, email, city, stage_id, campaign_name, value } = req.body || {};
-    const normalizedPhone = normalisePhone(phone);
-    const { rows: firstStage } = await q('SELECT id FROM stages ORDER BY position LIMIT 1');
-    const { rows } = await q(
-      `INSERT INTO leads (full_name, phone, email, city, stage_id, campaign_name, value, source, is_meta_verified)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,'manual',true) RETURNING *`,
-      [
-        full_name || 'Unnamed lead',
-        normalizedPhone,
-        email || null,
-        city || null,
-        stage_id || firstStage[0]?.id,
-        campaign_name || null,
-        value || 0
-      ]
-    );
-    const lead = rows[0];
+    const { lead } = await createManualLead(req.body || {});
+    res.json(lead);
+  } catch (e) {
+    next(e);
+  }
+});
 
-    // Any WhatsApp messages that arrived before this number was a known lead were
-    // queued in pending_messages — attach them now so the conversation isn't lost.
-    if (normalizedPhone) {
-      const { rows: pendingMsgs } = await q(
-        `SELECT * FROM pending_messages WHERE phone = $1 ORDER BY created_at ASC`,
-        [normalizedPhone]
-      );
-      if (pendingMsgs.length > 0) {
-        for (const msg of pendingMsgs) {
-          await q(
-            `INSERT INTO messages (lead_id, direction, channel, body, created_at)
-            VALUES ($1, 'in', $2, $3, $4)`,
-            [lead.id, msg.channel, msg.body, msg.created_at]
-          );
+/** Bulk import from the "Add lead manually" Excel upload. Body: { leads: [{full_name, phone, campaign_name, stage_id}, ...] }. */
+leadsRouter.post('/bulk', async (req, res, next) => {
+  try {
+    const { leads } = req.body || {};
+    if (!Array.isArray(leads) || leads.length === 0) return res.status(400).json({ error: 'No leads to import.' });
+    if (leads.length > 2000) return res.status(400).json({ error: 'Too many rows in one upload (max 2000).' });
+
+    let created = 0;
+    let skipped = 0;
+    const errors = [];
+
+    for (let i = 0; i < leads.length; i++) {
+      const row = leads[i];
+      if (!row.phone) {
+        skipped++;
+        errors.push({ row: i + 1, reason: 'Missing phone number.' });
+        continue;
+      }
+      try {
+        const result = await createManualLead(row, { skipIfExists: true });
+        if (result.skipped) {
+          skipped++;
+          errors.push({ row: i + 1, reason: result.reason });
+        } else {
+          created++;
         }
-        await q(`DELETE FROM pending_messages WHERE phone = $1`, [normalizedPhone]);
-        await q('UPDATE leads SET wants_whatsapp = true, updated_at = now() WHERE id = $1', [lead.id]);
+      } catch (e) {
+        skipped++;
+        errors.push({ row: i + 1, reason: e.message });
       }
     }
 
-    res.json(lead);
+    res.json({ created, skipped, errors });
   } catch (e) {
     next(e);
   }
