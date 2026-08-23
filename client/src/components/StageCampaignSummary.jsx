@@ -1,6 +1,14 @@
 import { useRef, useState } from 'react';
 import { useOutsideClick } from '../hooks/useOutsideClick.js';
 
+/** Converts a "#rrggbb" stage color into a faint rgba() tint for tile backgrounds. */
+function tint(hex, alpha) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex || '');
+  if (!m) return undefined;
+  const [r, g, b] = m.slice(1).map((h) => parseInt(h, 16));
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 function StageSummaryItem({ stage, leads, onPickCampaign }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -13,9 +21,14 @@ function StageSummaryItem({ stage, leads, onPickCampaign }) {
   }
   const entries = Object.entries(byCampaign).sort((a, b) => b[1] - a[1]);
 
+  const stageStyle = {
+    '--stage-color': stage.color || undefined,
+    '--stage-tint': tint(stage.color, 0.08)
+  };
+
   return (
     <div ref={ref} style={{ position: 'relative' }}>
-      <button className="stage-summary-btn" onClick={() => setOpen((o) => !o)}>
+      <button className="stage-summary-btn" style={stageStyle} onClick={() => setOpen((o) => !o)}>
         <span className="k">
           <span className="dot" style={{ background: stage.color }} />
           {stage.name}

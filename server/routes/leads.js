@@ -105,7 +105,7 @@ leadsRouter.get('/:id', async (req, res, next) => {
 * (used by bulk upload, where the same person can appear in the sheet more than
 * once, or already be a lead from a prior import).
 */
-async function createManualLead({ full_name, phone, email, city, stage_id, campaign_name, value }, { skipIfExists = false } = {}) {
+async function createManualLead({ full_name, phone, email, city, stage_id, campaign_name, value, remark }, { skipIfExists = false, remarkAuthor = 'me' } = {}) {
   const normalizedPhone = normalisePhone(phone);
 
   if (skipIfExists && normalizedPhone) {
@@ -128,6 +128,10 @@ async function createManualLead({ full_name, phone, email, city, stage_id, campa
     ]
   );
   const lead = rows[0];
+
+  if (remark && String(remark).trim()) {
+    await q('INSERT INTO remarks (lead_id, body, author) VALUES ($1,$2,$3)', [lead.id, String(remark).trim(), remarkAuthor]);
+  }
 
   // Any WhatsApp messages that arrived before this number was a known lead were
   // queued in pending_messages — attach them now so the conversation isn't lost.
@@ -180,7 +184,7 @@ leadsRouter.post('/bulk', async (req, res, next) => {
         continue;
       }
       try {
-        const result = await createManualLead(row, { skipIfExists: true });
+        const result = await createManualLead(row, { skipIfExists: true, remarkAuthor: 'upload' });
         if (result.skipped) {
           skipped++;
           errors.push({ row: i + 1, reason: result.reason });

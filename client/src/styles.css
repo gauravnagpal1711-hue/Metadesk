@@ -430,28 +430,31 @@ input::placeholder, textarea::placeholder { color: var(--muted-2); }
 
 .stage-summary-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  background: var(--surface);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  background: var(--canvas);
   border-bottom: 1px solid var(--line);
+  padding: 14px 24px;
 }
 .stage-summary-btn {
   display: block;
   width: 100%;
   text-align: left;
-  padding: 15px 24px;
-  border: 0;
-  border-right: 1px solid var(--line);
-  background: var(--surface);
+  padding: 13px 16px;
+  border: 1px solid var(--stage-color, var(--line));
+  border-left-width: 4px;
+  border-radius: var(--r-lg);
+  background: var(--stage-tint, var(--surface));
   cursor: pointer;
+  transition: box-shadow .12s ease;
 }
-.stage-summary-btn:last-child { border-right: 0; }
-.stage-summary-btn:hover { background: var(--surface-soft); }
+.stage-summary-btn:hover { box-shadow: 0 2px 8px rgba(24, 24, 27, .08); }
 .stage-summary-btn .k {
   display: flex; align-items: center; gap: 6px;
   font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em;
-  color: var(--muted-2); text-transform: uppercase;
+  color: var(--muted-3); text-transform: uppercase;
 }
-.stage-summary-btn .dot { width: 6px; height: 6px; border-radius: 2px; flex: 0 0 6px; }
+.stage-summary-btn .dot { width: 7px; height: 7px; border-radius: 2px; flex: 0 0 7px; }
 .stage-summary-btn .v { font-size: 24px; font-weight: 600; letter-spacing: -.025em; margin-top: 5px; color: var(--ink); }
 .stage-summary-btn .chev { font-size: 9px; color: var(--muted-2); margin-left: 4px; }
 

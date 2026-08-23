@@ -198,7 +198,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
               {remarks.map((r) => (
                 <div className="remark" key={r.id}>
                   <div>{r.body}</div>
-                  <div className="t">{when(r.created_at)}</div>
+                  <div className="t">{r.author === 'upload' ? 'UPLOADED' : new Date(r.created_at).toLocaleString()}</div>
                 </div>
               ))}
             </>

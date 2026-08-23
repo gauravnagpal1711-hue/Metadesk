@@ -5,7 +5,8 @@ const COLUMN_ALIASES = {
   name: ['name', 'full name', 'full_name', 'lead name', 'contact name', 'customer name'],
   phone: ['phone', 'number', 'mobile', 'whatsapp', 'phone number', 'contact number', 'mobile number', 'whatsapp number'],
   campaign: ['campaign', 'campaign name', 'campaign_name', 'source'],
-  stage: ['stage', 'status', 'current status', 'current stage']
+  stage: ['stage', 'status', 'current status', 'current stage'],
+  remark: ['remark', 'remarks', 'note', 'notes', 'comment', 'comments']
 };
 
 function csvCell(v) {
@@ -15,9 +16,9 @@ function csvCell(v) {
 
 function downloadTemplate(stages) {
   const rows = [
-    ['Name', 'Phone', 'Campaign', 'Stage'],
-    ['Priya Nair', '+91 98204 41209', 'Interiors — Lead Form A', stages[0]?.name || 'New lead'],
-    ['Aditya Kulkarni', '+91 90112 33487', '', '']
+    ['Name', 'Phone', 'Campaign', 'Stage', 'Remark'],
+    ['Priya Nair', '+91 98204 41209', 'Interiors — Lead Form A', stages[0]?.name || 'New lead', 'Budget ~₹6L, wants a site visit'],
+    ['Aditya Kulkarni', '+91 90112 33487', '', '', '']
   ];
   const csv = rows.map((r) => r.map(csvCell).join(',')).join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -47,6 +48,7 @@ export default function AddLeadModal({ stages, campaigns, onClose, onCreated, on
   const [phone, setPhone] = useState('');
   const [campaignName, setCampaignName] = useState('');
   const [stageId, setStageId] = useState(stages[0]?.id || '');
+  const [remark, setRemark] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -70,7 +72,8 @@ export default function AddLeadModal({ stages, campaigns, onClose, onCreated, on
         full_name: name.trim(),
         phone: phone.trim(),
         campaign_name: campaignName.trim() || null,
-        stage_id: stageId || undefined
+        stage_id: stageId || undefined,
+        remark: remark.trim() || undefined
       });
       onCreated(created);
     } catch (e) {
@@ -120,7 +123,8 @@ export default function AddLeadModal({ stages, campaigns, onClose, onCreated, on
         full_name: columns.name ? String(r[columns.name] || '').trim() : '',
         phone: String(r[columns.phone] || '').trim(),
         campaign_name: columns.campaign ? String(r[columns.campaign] || '').trim() || null : null,
-        stage_id: columns.stage ? stageIdForValue(r[columns.stage]) : (defaultStageId || undefined)
+        stage_id: columns.stage ? stageIdForValue(r[columns.stage]) : (defaultStageId || undefined),
+        remark: columns.remark ? String(r[columns.remark] || '').trim() || undefined : undefined
       }));
       const out = await api.post('/leads/bulk', { leads: payload });
       setResult(out);
@@ -218,6 +222,18 @@ export default function AddLeadModal({ stages, campaigns, onClose, onCreated, on
                 </select>
               </div>
 
+              <div className="field">
+                <label htmlFor="al-remark">Remark (optional)</label>
+                <textarea
+                  id="al-remark"
+                  className="textarea"
+                  style={{ minHeight: 60 }}
+                  placeholder="Budget ~₹6L, wants a site visit Saturday"
+                  value={remark}
+                  onChange={(e) => setRemark(e.target.value)}
+                />
+              </div>
+
               <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                 <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
                 <button className="btn primary" onClick={submit} disabled={busy}>
@@ -263,6 +279,7 @@ export default function AddLeadModal({ stages, campaigns, onClose, onCreated, on
                     <div>Phone column: <strong style={{ color: columns.phone ? 'inherit' : 'var(--danger)' }}>{columns.phone || 'not found — required'}</strong></div>
                     <div>Campaign column: <strong>{columns.campaign || 'not found — will leave blank'}</strong></div>
                     <div>Stage column: <strong>{columns.stage || 'not found — will use the default stage below'}</strong></div>
+                    <div>Remark column: <strong>{columns.remark || 'not found — no remark will be added'}</strong></div>
                   </div>
 
                   <div className="field">
@@ -274,7 +291,7 @@ export default function AddLeadModal({ stages, campaigns, onClose, onCreated, on
 
                   <div className="scroll-x" style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 8 }}>
                     <table className="table">
-                      <thead><tr><th>Name</th><th>Phone</th><th>Campaign</th><th>Stage</th></tr></thead>
+                      <thead><tr><th>Name</th><th>Phone</th><th>Campaign</th><th>Stage</th><th>Remark</th></tr></thead>
                       <tbody>
                         {rows.slice(0, 8).map((r, i) => (
                           <tr key={i}>
@@ -282,6 +299,7 @@ export default function AddLeadModal({ stages, campaigns, onClose, onCreated, on
                             <td className="num">{columns.phone ? r[columns.phone] : ''}</td>
                             <td>{columns.campaign ? r[columns.campaign] : ''}</td>
                             <td>{columns.stage ? r[columns.stage] : ''}</td>
+                            <td>{columns.remark ? r[columns.remark] : ''}</td>
                           </tr>
                         ))}
                       </tbody>
