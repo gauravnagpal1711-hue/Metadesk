@@ -168,6 +168,26 @@ leadsRouter.patch('/:id', async (req, res, next) => {
   }
 });
 
+// Dedicated stage-move endpoint — the client (drag-and-drop and the drawer's
+// stage chips) has always called this path, but it was never actually
+// defined, so every move silently 404'd. PATCH /:id above also accepts
+// stage_id and does the same thing; this just matches what the client calls.
+leadsRouter.patch('/:id/move', async (req, res, next) => {
+  try {
+    const { stage_id } = req.body || {};
+    if (stage_id === undefined) return res.status(400).json({ error: 'stage_id is required.' });
+    await q('INSERT INTO activity (lead_id, kind, detail) VALUES ($1, $2, $3)', [req.params.id, 'moved', `to stage ${stage_id}`]);
+    const { rows } = await q(
+      'UPDATE leads SET stage_id=$2, updated_at=now() WHERE id=$1 RETURNING *',
+      [req.params.id, stage_id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Lead not found.' });
+    res.json(rows[0]);
+  } catch (e) {
+    next(e);
+  }
+});
+
 leadsRouter.delete('/:id', async (req, res, next) => {
   try {
     await q('DELETE FROM leads WHERE id=$1', [req.params.id]);
