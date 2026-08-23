@@ -20,7 +20,7 @@ export const q = (text, params) => pool.query(text, params);
 const DEFAULT_STAGES = [
   { name: 'New lead', color: '#2B3AF0' },
   { name: 'Contacted', color: '#6B4BE8' },
-  { name: 'On WhatsApp', color: '#0E7C5A' },
+  { name: 'Appointment Book', color: '#0E7C5A' },
   { name: 'Interested', color: '#B8860F' },
   { name: 'Won', color: '#0E7C5A', is_won: true },
   { name: 'Lost', color: '#8A8F9B', is_lost: true }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, when } from '../api.js';
 import LeadDrawer from '../components/LeadDrawer.jsx';
 import AddLeadModal from '../components/AddLeadModal.jsx';
+import ManageStagesModal from '../components/ManageStagesModal.jsx';
 
 export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = [] }) {
   const [stages, setStages] = useState([]);
@@ -10,6 +11,7 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
   const [overStage, setOverStage] = useState(null);
   const [openId, setOpenId] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [stagesOpen, setStagesOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -78,6 +80,7 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
           {leads.length} LEADS · {wonCount} WON · {stages.length} STAGES
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <button className="btn" onClick={() => setStagesOpen(true)}>Manage stages</button>
           <button className="btn" onClick={() => setAddOpen(true)}>Add lead manually</button>
           <button className="btn primary" onClick={pullFromMeta} disabled={busy}>
             {busy ? 'Pulling…' : 'Pull from Meta'}
@@ -153,6 +156,14 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
           campaigns={campaigns}
           onClose={() => setAddOpen(false)}
           onCreated={onLeadCreated}
+        />
+      )}
+
+      {stagesOpen && (
+        <ManageStagesModal
+          stages={stages}
+          onClose={() => setStagesOpen(false)}
+          onChanged={setStages}
         />
       )}
     </>
