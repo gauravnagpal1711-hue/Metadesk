@@ -94,7 +94,7 @@ export default function App() {
   if (!authed) return <Login onDone={() => setAuthed(true)} />;
 
   const active = TABS.find((t) => t.id === tab);
-  const showMetrics = tab === 'leads' || tab === 'campaigns';
+  const showMetrics = tab === 'campaigns';
 
   return (
     <div className="shell">
