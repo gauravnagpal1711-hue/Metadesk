@@ -19,6 +19,7 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [copiedId, setCopiedId] = useState(null);
+  const [pendingDrop, setPendingDrop] = useState(null); // { leadId, stageId, stageName, needsAppointment, needsFollowup, appointmentDate, followupDate }
 
   const load = useCallback(async () => {
     const board = await api.get('/leads/board');
@@ -52,12 +53,39 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
     if (!dragId) return;
     const id = dragId;
     setDragId(null);
+
+    const lead = leads.find((l) => l.id === id);
+    const stage = stages.find((s) => s.id === stageId);
+    const needsAppointment = !!stage?.requires_appointment_date && !lead?.appointment_date;
+    const needsFollowup = !!stage?.requires_followup_date && !lead?.followup_date;
+    if (needsAppointment || needsFollowup) {
+      setPendingDrop({ leadId: id, stageId, stageName: stage?.name, needsAppointment, needsFollowup, appointmentDate: '', followupDate: '' });
+      return;
+    }
+
     setLeads((l) => l.map((x) => (x.id === id ? { ...x, stage_id: stageId } : x)));
     try {
       await api.patch(`/leads/${id}/move`, { stage_id: stageId });
     } catch (e) {
       setError(e.message);
       load().catch(() => {});
+    }
+  }
+
+  async function confirmPendingDrop() {
+    const { leadId, stageId, needsAppointment, needsFollowup, appointmentDate, followupDate } = pendingDrop;
+    if (needsAppointment && !appointmentDate) return;
+    if (needsFollowup && !followupDate) return;
+    setError('');
+    try {
+      const body = { stage_id: stageId };
+      if (needsAppointment) body.appointment_date = new Date(appointmentDate).toISOString();
+      if (needsFollowup) body.followup_date = new Date(followupDate).toISOString();
+      await api.patch(`/leads/${leadId}/move`, body);
+      setPendingDrop(null);
+      await load();
+    } catch (e) {
+      setError(e.message);
     }
   }
 
@@ -225,6 +253,53 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
           onClose={() => setStagesOpen(false)}
           onChanged={setStages}
         />
+      )}
+
+      {pendingDrop && (
+        <>
+          <div className="scrim" onClick={() => setPendingDrop(null)} />
+          <div style={{ position: 'fixed', inset: 0, zIndex: 42, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+            <div className="card" style={{ width: '100%', maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+              <h2 style={{ margin: 0 }}>Moving to {pendingDrop.stageName}</h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>
+                {pendingDrop.needsAppointment && (
+                  <div className="field">
+                    <label>Appointment date</label>
+                    <input
+                      type="datetime-local"
+                      className="input"
+                      value={pendingDrop.appointmentDate}
+                      onChange={(e) => setPendingDrop((p) => ({ ...p, appointmentDate: e.target.value }))}
+                      autoFocus
+                    />
+                  </div>
+                )}
+                {pendingDrop.needsFollowup && (
+                  <div className="field">
+                    <label>Followup date</label>
+                    <input
+                      type="datetime-local"
+                      className="input"
+                      value={pendingDrop.followupDate}
+                      onChange={(e) => setPendingDrop((p) => ({ ...p, followupDate: e.target.value }))}
+                      autoFocus={!pendingDrop.needsAppointment}
+                    />
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
+                <button className="btn ghost" onClick={() => setPendingDrop(null)}>Cancel</button>
+                <button
+                  className="btn primary"
+                  onClick={confirmPendingDrop}
+                  disabled={(pendingDrop.needsAppointment && !pendingDrop.appointmentDate) || (pendingDrop.needsFollowup && !pendingDrop.followupDate)}
+                >
+                  Move lead
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
       )}
     </>
   );
