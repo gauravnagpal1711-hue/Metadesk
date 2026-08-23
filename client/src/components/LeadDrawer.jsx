@@ -49,6 +49,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   const [sending, setSending] = useState(false);
   const [customRows, setCustomRows] = useState([]);
   const [pendingStage, setPendingStage] = useState(null); // { stageId, date }
+  const [copiedPhone, setCopiedPhone] = useState(false);
   const endRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -175,6 +176,12 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
     await load();
   }
 
+  function copyPhone() {
+    navigator.clipboard?.writeText(lead.phone);
+    setCopiedPhone(true);
+    setTimeout(() => setCopiedPhone(false), 1200);
+  }
+
   async function saveCustomFields(rows) {
     const obj = {};
     for (const r of rows) {
@@ -208,7 +215,14 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
           <div className="top">
             <div style={{ flex: 1, minWidth: 0 }}>
               <h2>{lead.full_name || 'Unnamed lead'}</h2>
-              <div className="meta">{lead.phone || 'No phone'}</div>
+              <div className="meta phone-row">
+                {lead.phone && (
+                  <button className="copy-btn" onClick={copyPhone} title="Copy phone number" aria-label="Copy phone number">
+                    {copiedPhone ? '✓' : '📋'}
+                  </button>
+                )}
+                {lead.phone || 'No phone'}
+              </div>
             </div>
             <button className="close" onClick={onClose} aria-label="Close">×</button>
           </div>

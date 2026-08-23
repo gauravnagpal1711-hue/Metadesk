@@ -18,6 +18,7 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
   const [sortBy, setSortBy] = useState('created');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [copiedId, setCopiedId] = useState(null);
 
   const load = useCallback(async () => {
     const board = await api.get('/leads/board');
@@ -58,6 +59,13 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
       setError(e.message);
       load().catch(() => {});
     }
+  }
+
+  function copyPhone(e, phone, id) {
+    e.stopPropagation();
+    navigator.clipboard?.writeText(phone);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 1200);
   }
 
   function onLeadCreated(created) {
@@ -146,7 +154,19 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
                       <span className="who">{lead.full_name || 'Unnamed lead'}</span>
                       <span className="age">{when(lead.created_at)}</span>
                     </div>
-                    {lead.phone && <div className="meta">{lead.phone}</div>}
+                    {lead.phone && (
+                      <div className="meta phone-row">
+                        <button
+                          className="copy-btn"
+                          onClick={(e) => copyPhone(e, lead.phone, lead.id)}
+                          title="Copy phone number"
+                          aria-label="Copy phone number"
+                        >
+                          {copiedId === lead.id ? '✓' : '📋'}
+                        </button>
+                        {lead.phone}
+                      </div>
+                    )}
                     {lead.campaign_name && <div className="campaign">{lead.campaign_name}</div>}
                     {lead.appointment_date && (
                       <div className="appointment-date">
