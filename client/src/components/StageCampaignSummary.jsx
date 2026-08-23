@@ -16,10 +16,12 @@ function StageSummaryItem({ stage, leads, onPickCampaign }) {
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button className="stage-summary-btn" onClick={() => setOpen((o) => !o)}>
-        <span className="dot" style={{ background: stage.color }} />
-        <span className="name">{stage.name}</span>
-        <span className="count num">{leads.length}</span>
-        <span className="chev">{open ? '▲' : '▼'}</span>
+        <span className="k">
+          <span className="dot" style={{ background: stage.color }} />
+          {stage.name}
+          <span className="chev">{open ? '▲' : '▼'}</span>
+        </span>
+        <div className="v">{leads.length}</div>
       </button>
       {open && (
         <div className="dropdown-pop" style={{ left: 0 }}>
@@ -39,8 +41,9 @@ function StageSummaryItem({ stage, leads, onPickCampaign }) {
   );
 }
 
-/** Stage-wise lead counts, each expandable to a per-campaign breakdown. Clicking a
- * campaign in the breakdown applies it to the campaign filter above the board. */
+/** Stage-wise lead counts as big tiles (matching the old metrics-strip look), each
+ * expandable to a per-campaign breakdown. Clicking a campaign in the breakdown
+ * applies it to the campaign filter above the board. */
 export default function StageCampaignSummary({ stages, leads, onPickCampaign }) {
   return (
     <div className="stage-summary-row">
