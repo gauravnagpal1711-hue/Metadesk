@@ -15,6 +15,7 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
   const [addOpen, setAddOpen] = useState(false);
   const [stagesOpen, setStagesOpen] = useState(false);
   const [campaignFilter, setCampaignFilter] = useState([]);
+  const [sortBy, setSortBy] = useState('created');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -67,6 +68,14 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
 
   const distinctCampaigns = [...new Set(leads.map((l) => l.campaign_name).filter(Boolean))].sort();
 
+  function sortLeads(list) {
+    const sorted = [...list];
+    if (sortBy === 'updated') sorted.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+    else if (sortBy === 'name') sorted.sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
+    else sorted.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    return sorted;
+  }
+
   const term = (query || '').trim().toLowerCase();
   const visible = leads
     .filter((l) => !term || [l.full_name, l.phone, l.email, l.city, l.campaign_name]
@@ -84,6 +93,11 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <CampaignFilter options={distinctCampaigns} selected={campaignFilter} onChange={setCampaignFilter} />
+          <select className="select" value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ width: 150 }}>
+            <option value="created">Sort: Lead date</option>
+            <option value="updated">Sort: Update time</option>
+            <option value="name">Sort: Name</option>
+          </select>
           <button className="btn" onClick={() => setStagesOpen(true)}>Manage stages</button>
           <button className="btn" onClick={() => setAddOpen(true)}>Add lead manually</button>
           <button className="btn primary" onClick={pullFromMeta} disabled={busy}>
@@ -99,7 +113,7 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
       <div className="board">
         {stages.map((stage) => {
           const stageLeads = leads.filter((l) => l.stage_id === stage.id);
-          const items = visible.filter((l) => l.stage_id === stage.id);
+          const items = sortLeads(visible.filter((l) => l.stage_id === stage.id));
           const value = stageLeads.reduce((a, l) => a + Number(l.value || 0), 0);
           return (
             <section
