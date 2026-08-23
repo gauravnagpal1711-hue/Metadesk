@@ -8,6 +8,29 @@ const COLUMN_ALIASES = {
   stage: ['stage', 'status', 'current status', 'current stage']
 };
 
+function csvCell(v) {
+  const s = String(v ?? '');
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function downloadTemplate(stages) {
+  const rows = [
+    ['Name', 'Phone', 'Campaign', 'Stage'],
+    ['Priya Nair', '+91 98204 41209', 'Interiors — Lead Form A', stages[0]?.name || 'New lead'],
+    ['Aditya Kulkarni', '+91 90112 33487', '', '']
+  ];
+  const csv = rows.map((r) => r.map(csvCell).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'ads-desk-leads-template.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function detectColumns(headers) {
   const found = {};
   for (const [field, aliases] of Object.entries(COLUMN_ALIASES)) {
@@ -213,12 +236,17 @@ export default function AddLeadModal({ stages, campaigns, onClose, onCreated, on
                       Upload an Excel (.xlsx, .xls) or CSV file. First row should have column headers —
                       we'll auto-detect Name, Phone, Campaign and Stage columns.
                     </div>
-                    <input
-                      ref={fileRef}
-                      type="file"
-                      accept=".xlsx,.xls,.csv"
-                      onChange={(e) => pickFile(e.target.files?.[0])}
-                    />
+                    <button className="btn sm" style={{ marginBottom: 12 }} onClick={() => downloadTemplate(stages)}>
+                      Download template (.csv)
+                    </button>
+                    <div>
+                      <input
+                        ref={fileRef}
+                        type="file"
+                        accept=".xlsx,.xls,.csv"
+                        onChange={(e) => pickFile(e.target.files?.[0])}
+                      />
+                    </div>
                   </div>
                   <div style={{ display: 'flex', marginTop: 14 }}>
                     <button className="btn" onClick={onClose} style={{ marginLeft: 'auto' }}>Cancel</button>
