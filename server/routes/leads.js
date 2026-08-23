@@ -205,7 +205,7 @@ leadsRouter.post('/bulk', async (req, res, next) => {
 
 leadsRouter.patch('/:id', async (req, res, next) => {
   try {
-    const { stage_id, full_name, email, city, value, campaign_name } = req.body || {};
+    const { stage_id, full_name, email, city, value, campaign_name, custom_fields } = req.body || {};
     if (stage_id !== undefined) {
       const { rows: stageRow } = await q('SELECT name FROM stages WHERE id=$1', [stage_id]);
       await q('INSERT INTO activity (lead_id, kind, detail) VALUES ($1, $2, $3)', [req.params.id, 'moved', `Moved to ${stageRow[0]?.name || 'a stage'}`]);
@@ -218,9 +218,10 @@ leadsRouter.patch('/:id', async (req, res, next) => {
       city=COALESCE($5,city),
       value=COALESCE($6,value),
       campaign_name=COALESCE($7,campaign_name),
+      custom_fields=COALESCE($8,custom_fields),
       updated_at=now()
       WHERE id=$1 RETURNING *`,
-      [req.params.id, stage_id, full_name, email, city, value, campaign_name]
+      [req.params.id, stage_id, full_name, email, city, value, campaign_name, custom_fields !== undefined ? JSON.stringify(custom_fields) : undefined]
     );
     res.json(rows[0]);
   } catch (e) {

@@ -58,9 +58,12 @@ stage_id INTEGER REFERENCES stages(id) ON DELETE SET NULL,
 board_order INTEGER NOT NULL DEFAULT 0,
 value NUMERIC DEFAULT 0,
 fields JSONB,
+custom_fields JSONB NOT NULL DEFAULT '{}'::jsonb,
 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS custom_fields JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE INDEX IF NOT EXISTS leads_stage_idx ON leads(stage_id);
 CREATE INDEX IF NOT EXISTS leads_phone_idx ON leads(phone);

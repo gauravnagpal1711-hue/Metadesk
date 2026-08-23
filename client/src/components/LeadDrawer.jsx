@@ -38,6 +38,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
+  const [customRows, setCustomRows] = useState([]);
   const endRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -50,6 +51,14 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   useEffect(() => {
     if (view === 'chat') endRef.current?.scrollIntoView({ block: 'end' });
   }, [data, view]);
+
+  // Re-seed the custom-fields editor only when a different lead's data first
+  // arrives, not on every reload — otherwise an in-progress edit would be
+  // wiped out by the reload that follows saving another field.
+  useEffect(() => {
+    const cf = data?.lead?.custom_fields || {};
+    setCustomRows(Object.entries(cf).map(([key, value]) => ({ key, value: value == null ? '' : String(value) })));
+  }, [data?.lead?.id]);
 
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && onClose();
@@ -123,6 +132,31 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
     if (value === (lead[key] ?? '')) return;
     await api.patch(`/leads/${leadId}`, { [key]: value });
     await load();
+  }
+
+  async function saveCustomFields(rows) {
+    const obj = {};
+    for (const r of rows) {
+      if (r.key.trim()) obj[r.key.trim()] = r.value;
+    }
+    await api.patch(`/leads/${leadId}`, { custom_fields: obj });
+    await load();
+  }
+
+  function updateCustomRow(i, field, value) {
+    setCustomRows((rows) => rows.map((r, idx) => (idx === i ? { ...r, [field]: value } : r)));
+  }
+
+  function removeCustomRow(i) {
+    setCustomRows((rows) => {
+      const next = rows.filter((_, idx) => idx !== i);
+      saveCustomFields(next);
+      return next;
+    });
+  }
+
+  function addCustomRow() {
+    setCustomRows((rows) => [...rows, { key: '', value: '' }]);
   }
 
   return (
@@ -279,6 +313,30 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
                   </dl>
                 </>
               )}
+
+              <div className="mono-label" style={{ margin: '4px 0 4px' }}>Custom fields</div>
+              {customRows.map((row, i) => (
+                <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    className="input"
+                    placeholder="Label"
+                    value={row.key}
+                    onChange={(e) => updateCustomRow(i, 'key', e.target.value)}
+                    onBlur={() => saveCustomFields(customRows)}
+                    style={{ flex: '0 0 40%' }}
+                  />
+                  <input
+                    className="input"
+                    placeholder="Value"
+                    value={row.value}
+                    onChange={(e) => updateCustomRow(i, 'value', e.target.value)}
+                    onBlur={() => saveCustomFields(customRows)}
+                    style={{ flex: 1 }}
+                  />
+                  <button className="btn ghost sm" onClick={() => removeCustomRow(i)} aria-label="Remove field" title="Remove field">×</button>
+                </div>
+              ))}
+              <button className="btn ghost sm" onClick={addCustomRow} style={{ alignSelf: 'flex-start' }}>+ Add field</button>
             </>
           )}
         </div>
