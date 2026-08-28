@@ -46,10 +46,20 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
     greeting: 'Get in touch',
     subtext: 'Leave your details and we will contact you shortly.',
     fields: ['name', 'phone'],
+    custom_questions: [],
     thank_you_title: 'Thank you!',
     thank_you_body: 'We will be in touch soon.',
     privacy_url: ''
   };
+  function addCustomQ() {
+    setNewForm((s) => ({ ...s, custom_questions: [...s.custom_questions, { label: '', options: '' }] }));
+  }
+  function updateCustomQ(i, patch) {
+    setNewForm((s) => ({ ...s, custom_questions: s.custom_questions.map((q, idx) => (idx === i ? { ...q, ...patch } : q)) }));
+  }
+  function removeCustomQ(i) {
+    setNewForm((s) => ({ ...s, custom_questions: s.custom_questions.filter((_, idx) => idx !== i) }));
+  }
   function toggleFormField(f) {
     setNewForm((s) => {
       if (f === 'phone') return s; // phone is always collected
@@ -62,7 +72,13 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
     setBusy(true);
     setError('');
     try {
-      const created = await api.post('/meta/lead-forms', newForm);
+      const payload = {
+        ...newForm,
+        custom_questions: newForm.custom_questions
+          .filter((q) => q.label.trim())
+          .map((q) => ({ label: q.label.trim(), options: q.options.split(',').map((o) => o.trim()).filter(Boolean) }))
+      };
+      const created = await api.post('/meta/lead-forms', payload);
       setForms((fs) => [{ id: created.id, name: created.name, fields: newForm.fields }, ...fs]);
       setDestValue(created.id);
       setNewForm(null);
@@ -174,6 +190,26 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
               ))}
             </div>
           </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label>Extra questions (optional)</label>
+            {newForm.custom_questions.map((cq, i) => (
+              <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                <input
+                  className="input" placeholder="Question, e.g. Budget?"
+                  value={cq.label} onChange={(e) => updateCustomQ(i, { label: e.target.value })}
+                  style={{ flex: '0 0 45%' }}
+                />
+                <input
+                  className="input" placeholder="Choices, comma-separated (blank = free text)"
+                  value={cq.options} onChange={(e) => updateCustomQ(i, { options: e.target.value })}
+                  style={{ flex: 1 }}
+                />
+                <button className="btn ghost sm danger" onClick={() => removeCustomQ(i)} aria-label="Remove">×</button>
+              </div>
+            ))}
+            <button className="btn ghost sm" style={{ alignSelf: 'flex-start' }} onClick={addCustomQ}>+ Add a question</button>
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <div className="field" style={{ margin: 0 }}>
               <label>Thank-you title</label>

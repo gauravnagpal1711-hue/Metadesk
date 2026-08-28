@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { api, money } from '../api.js';
-import CityPicker from './CityPicker.jsx';
+import LocationPicker from './LocationPicker.jsx';
 import InterestPicker from './InterestPicker.jsx';
 
 /**
@@ -20,7 +20,7 @@ export default function CampaignEditModal({ campaign, creatives, onClose, onInst
   const [savingInstant, setSavingInstant] = useState(false);
 
   const [advanced, setAdvanced] = useState(false);
-  const [cities, setCities] = useState([]);
+  const [loc, setLoc] = useState(null); // null until the user opts to change location
   const [ageMin, setAgeMin] = useState('');
   const [ageMax, setAgeMax] = useState('');
   const [genders, setGenders] = useState([]);
@@ -58,7 +58,14 @@ export default function CampaignEditModal({ campaign, creatives, onClose, onInst
 
   async function saveQueued() {
     const changes = {};
-    if (cities.length) changes.locations = cities.map((l) => ({ key: l.key, name: l.name, type: l.type, region: l.region, radius_km: l.radius_km }));
+    if (loc) {
+      changes.location_mode = loc.mode;
+      changes.who = loc.who;
+      if (loc.mode === 'nearby' && loc.center) { changes.radius_center = loc.center; changes.radius_km = loc.radius_km; }
+      if (loc.mode === 'cities' && loc.cities.length) {
+        changes.locations = loc.cities.map((l) => ({ key: l.key, name: l.name, type: l.type, region: l.region, radius_km: l.radius_km }));
+      }
+    }
     if (ageMin !== '') changes.age_min = Number(ageMin);
     if (ageMax !== '') changes.age_max = Number(ageMax);
     if (genders.length) changes.genders = genders;
@@ -78,7 +85,7 @@ export default function CampaignEditModal({ campaign, creatives, onClose, onInst
       });
       onQueued(edit);
       setOk(`Change queued — tell Claude: apply campaign edit #${edit.id}`);
-      setCities([]); setAgeMin(''); setAgeMax(''); setGenders([]); setInterests([]); setEndAt(''); setSwapCreative('');
+      setLoc(null); setAgeMin(''); setAgeMax(''); setGenders([]); setInterests([]); setEndAt(''); setSwapCreative('');
     } catch (e) {
       setError(e.message);
     } finally {
@@ -133,8 +140,14 @@ export default function CampaignEditModal({ campaign, creatives, onClose, onInst
                 These need a bigger change on Meta — fill only what you want changed, save, then tell Claude.
               </div>
               <div className="field" style={{ margin: 0 }}>
-                <label>New areas (replaces current)</label>
-                <CityPicker value={cities} onChange={setCities} />
+                <label>Change where the ad shows (replaces current)</label>
+                {loc ? (
+                  <LocationPicker value={loc} onChange={setLoc} />
+                ) : (
+                  <button className="btn sm" onClick={() => setLoc({ mode: 'nearby', center: null, radius_km: 5, cities: [], who: 'residents' })}>
+                    Change location / radius
+                  </button>
+                )}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 <div className="field" style={{ margin: 0 }}><label>Age from</label><input className="input" type="number" placeholder="—" value={ageMin} onChange={(e) => setAgeMin(e.target.value)} /></div>

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, money } from '../api.js';
-import CityPicker from './CityPicker.jsx';
+import LocationPicker from './LocationPicker.jsx';
 import InterestPicker from './InterestPicker.jsx';
+
+const BLANK_LOC = { mode: 'nearby', center: null, radius_km: 5, cities: [], who: 'residents' };
 
 const MIN_BUDGET = 100;
 
@@ -29,7 +31,7 @@ export default function CreateCampaignModal({ creatives, onClose, onSaved }) {
 
   const [name, setName] = useState(ready[0]?.label || ready[0]?.headline || '');
   const [budget, setBudget] = useState(400);
-  const [locations, setLocations] = useState([]);
+  const [loc, setLoc] = useState(BLANK_LOC);
   const [startMode, setStartMode] = useState('now');
   const [startAt, setStartAt] = useState('');
   const [endAt, setEndAt] = useState('');
@@ -47,6 +49,11 @@ export default function CreateCampaignModal({ creatives, onClose, onSaved }) {
   const [error, setError] = useState('');
 
   useEffect(() => { api.get('/meta/page').then(setPage).catch(() => {}); }, []);
+  useEffect(() => {
+    api.get('/meta/shop-location').then((s) => {
+      if (s?.lat != null) setLoc((v) => (v.center ? v : { ...v, center: { lat: s.lat, lng: s.lng, label: s.label }, radius_km: s.radius_km || 5 }));
+    }).catch(() => {});
+  }, []);
 
   function pickCreative(id) {
     setCreativeId(id);
@@ -69,12 +76,19 @@ export default function CreateCampaignModal({ creatives, onClose, onSaved }) {
     if (!name.trim()) return setError('Give the campaign a name.');
     if (!chosen) return setError('Pick a creative that is set up for campaigns.');
     if (Number(budget) < MIN_BUDGET) return setError(`Daily budget must be at least ₹${MIN_BUDGET}.`);
-    if (locations.length === 0) return setError('Add at least one city.');
+    if (loc.mode === 'nearby' && !loc.center) return setError('Set where your shop is (current location or PIN code).');
+    if (loc.mode === 'cities' && loc.cities.length === 0) return setError('Add at least one city.');
     setBusy(true);
     setError('');
     try {
       const audience = {
-        locations: locations.map((l) => ({ key: l.key, name: l.name, type: l.type, region: l.region, radius_km: l.radius_km })),
+        location_mode: loc.mode,
+        radius_center: loc.mode === 'nearby' ? loc.center : null,
+        radius_km: loc.mode === 'nearby' ? loc.radius_km : null,
+        locations: loc.mode === 'cities'
+          ? loc.cities.map((l) => ({ key: l.key, name: l.name, type: l.type, region: l.region, radius_km: l.radius_km }))
+          : [],
+        who: loc.who,
         age_min: Number(ageMin),
         age_max: Number(ageMax),
         genders: genders.includes('all') ? ['all'] : genders,
@@ -161,8 +175,8 @@ export default function CreateCampaignModal({ creatives, onClose, onSaved }) {
               </div>
 
               <div className="field">
-                <label>Which areas?</label>
-                <CityPicker value={locations} onChange={setLocations} />
+                <label>Where should the ad show?</label>
+                <LocationPicker value={loc} onChange={setLoc} />
               </div>
 
               <div className="mono-label" style={{ margin: '6px 0 4px' }}>When</div>

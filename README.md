@@ -122,9 +122,17 @@ exception is `POST /api/meta/lead-forms`.
 creates them itself with the one Graph write it makes — `POST /{page_id}/leadgen_forms`
 via `createLeadForm()` in `server/services/meta.js`. In *Set up for campaign* →
 *Fill a quick form* → *+ New form*, the shopkeeper fills a plain mini-builder
-(name, greeting, which fields to collect, thank-you text, privacy URL); the form
-is created on the Page instantly (no spend, deletable) and auto-selected. The
-picker also lists any forms that already exist.
+(name, greeting, which standard fields to collect, **extra questions** —
+a label alone = short text, a label + comma-separated choices = multiple choice,
+mapped to Meta `questions:[{type:'CUSTOM', label, options?}]` — thank-you text,
+privacy URL). The form is created on the Page instantly (no spend, deletable)
+and auto-selected. The picker also lists any forms that already exist.
+
+**Nearby targeting:** the location step defaults to *Near my shop* — the shopkeeper
+taps *Use my current location* (browser geolocation) or types a PIN code (resolved
+via `GET /api/meta/geo`, which now includes `zip` results with lat/long) and sets
+a radius (1–40 km). Saved once via `POST /api/meta/shop-location`, every new
+campaign pre-fills it. *Whole city* mode keeps the city type-ahead.
 
 **What Claude Code does** (no code in this repo — MCP tools run in the session):
 
@@ -133,7 +141,7 @@ picker also lists any forms that already exist.
 | Resolve account / page | `ads_get_ad_accounts`, `ads_get_ad_account_pages` | |
 | Upload the image | `ads_creative_upload_local_image` | creative `image_data` (a data URL from `GET /api/campaign-briefs/:id`) is written to a temp file first → `image_hash` |
 | Campaign | `ads_create_campaign` | `objective=OUTCOME_LEADS`, `status=PAUSED`, `special_ad_categories=[]` |
-| Ad set | `ads_create_ad_set` | `status=PAUSED`, `daily_budget` in paise; WhatsApp → `optimization_goal=CONVERSATIONS`, `destination_type=WHATSAPP`, `promoted_object={page_id}`; Instant form → `optimization_goal=LEAD_GENERATION`, `promoted_object={page_id, lead_gen_form_id}`. Targeting from `audience`: `geo_locations.cities:[{key, radius:<radius_km>, distance_unit:'kilometer'}]`, `age_min/max`, `genders` (1=male, 2=female; omit for all), `flexible_spec:[{interests:[{id}]}]` when interests set. `audience.advanced.optimization_goal` / `bid_cap_rupees` override the defaults. |
+| Ad set | `ads_create_ad_set` | `status=PAUSED`, `daily_budget` in paise; WhatsApp → `optimization_goal=CONVERSATIONS`, `destination_type=WHATSAPP`, `promoted_object={page_id}`; Instant form → `optimization_goal=LEAD_GENERATION`, `promoted_object={page_id, lead_gen_form_id}`. **Targeting from `audience`:** `location_mode:'nearby'` → `geo_locations.custom_locations:[{latitude, longitude, radius:<radius_km>, distance_unit:'kilometer'}]` from `radius_center` + `radius_km`; `location_mode:'cities'` → `geo_locations.cities:[{key, radius:<radius_km>, distance_unit:'kilometer'}]` from `locations`. `who:'residents'` → `geo_locations.location_types:['home']` (omit for 'anyone'). `age_min/max`, `genders` (1=male, 2=female; omit for all), `flexible_spec:[{interests:[{id}]}]` when interests set. `audience.advanced.optimization_goal` / `bid_cap_rupees` override the defaults. |
 | Ad creative | `ads_create_creative` | `image_hash` + primary text/headline + `call_to_action {type, value}` (WhatsApp deep link / `lead_gen_form_id` / `link_url`) |
 | Ad | `ads_create_ad` | `status=PAUSED`, ad set + creative |
 | Preview | `ads_get_ad_preview` | sanity-check the render |

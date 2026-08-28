@@ -166,14 +166,19 @@ export async function listLeadForms(pageId) {
 
 /* ---------- helpers for the in-app campaign builder (all reads except createLeadForm) ---------- */
 
-/** City / region type-ahead. Returns Meta geo keys the ad-set targeting needs. */
+/**
+ * City / region / PIN-code type-ahead. Returns Meta geo keys the ad-set
+ * targeting needs; zip results also carry latitude/longitude so the client can
+ * offer a "within X km of here" radius around the shop.
+ */
 export async function searchGeo(qStr) {
   if (!qStr || !qStr.trim()) return [];
+  const isPin = /^\d{4,10}$/.test(qStr.trim());
   const data = await graph('search', {
     params: {
       type: 'adgeolocation',
       q: qStr.trim(),
-      location_types: JSON.stringify(['city', 'region']),
+      location_types: JSON.stringify(isPin ? ['zip'] : ['city', 'region', 'zip']),
       limit: 8
     }
   });
@@ -182,8 +187,36 @@ export async function searchGeo(qStr) {
     name: g.name,
     type: g.type,
     region: g.region || null,
-    country_code: g.country_code || null
+    country_code: g.country_code || null,
+    primary_city: g.primary_city || null,
+    latitude: g.latitude ?? null,
+    longitude: g.longitude ?? null
   }));
+}
+
+const SHOP_LOCATION_KEY = 'shop_location';
+
+/** The shopkeeper's saved shop location — every campaign defaults to "near here". */
+export async function getShopLocation() {
+  try {
+    return (await getSetting(SHOP_LOCATION_KEY, null)) || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function setShopLocation(loc) {
+  if (loc && loc.lat != null && loc.lng != null) {
+    await setSetting(SHOP_LOCATION_KEY, {
+      lat: Number(loc.lat),
+      lng: Number(loc.lng),
+      label: String(loc.label || 'My shop').slice(0, 80),
+      radius_km: Math.min(80, Math.max(1, Number(loc.radius_km) || 5))
+    });
+  } else {
+    await setSetting(SHOP_LOCATION_KEY, null);
+  }
+  return getShopLocation();
 }
 
 /** Interest type-ahead for the Advanced targeting section. */
@@ -276,6 +309,16 @@ export async function createLeadForm(spec = {}) {
   const wanted = Array.isArray(spec.fields) && spec.fields.length ? spec.fields : ['name', 'phone'];
   const questions = [...new Set(wanted)].map((f) => ({ type: QUESTION_TYPE[f] || 'FULL_NAME' }));
   if (!questions.some((q) => q.type === 'PHONE')) questions.push({ type: 'PHONE' });
+
+  // Custom questions from the mini-builder: a plain label = short-text answer;
+  // a label + options = a multiple-choice question.
+  for (const cq of Array.isArray(spec.custom_questions) ? spec.custom_questions : []) {
+    const label = String(cq?.label || '').trim();
+    if (!label) continue;
+    const opts = (Array.isArray(cq.options) ? cq.options : [])
+      .map((o) => String(o).trim()).filter(Boolean);
+    questions.push(opts.length ? { type: 'CUSTOM', label, options: opts.map((value) => ({ value })) } : { type: 'CUSTOM', label });
+  }
 
   const privacyUrl = (spec.privacy_url || '').trim() || 'https://www.facebook.com/privacy/policy/';
   const body = {

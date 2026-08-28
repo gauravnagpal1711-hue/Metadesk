@@ -4,6 +4,8 @@ import {
   searchInterests,
   resolveWhatsappNumber,
   setWhatsappNumber,
+  getShopLocation,
+  setShopLocation,
   getPageInfo,
   listLeadForms,
   createLeadForm,
@@ -68,6 +70,31 @@ metaTargetingRouter.delete('/whatsapp-number', async (req, res, next) => {
 metaTargetingRouter.get('/page', async (req, res, next) => {
   try {
     res.json(await getPageInfo());
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** The shopkeeper's saved shop location — campaigns default to "near here". */
+metaTargetingRouter.get('/shop-location', async (req, res, next) => {
+  try {
+    res.json(await getShopLocation());
+  } catch (e) {
+    next(e);
+  }
+});
+
+metaTargetingRouter.post('/shop-location', async (req, res, next) => {
+  try {
+    res.json(await setShopLocation(req.body || {}));
+  } catch (e) {
+    next(e);
+  }
+});
+
+metaTargetingRouter.delete('/shop-location', async (req, res, next) => {
+  try {
+    res.json(await setShopLocation(null));
   } catch (e) {
     next(e);
   }
