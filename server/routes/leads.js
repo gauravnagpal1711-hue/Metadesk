@@ -264,6 +264,55 @@ leadsRouter.get('/analytics', async (req, res, next) => {
          AND (l.last_contacted_at IS NULL OR l.last_contacted_at < now() - interval '7 days')`)
     ]);
 
+    // Daily activity log — what work was actually done each day (stage moves,
+    // contacts logged, outbound messages, tasks completed/added, remarks).
+    // Filtered by the action's own date and (optionally) the lead's campaign.
+    const p2 = [];
+    const a2 = (v) => { p2.push(v); return `$${p2.length}`; };
+    const campPh = campaigns.length ? a2(campaigns) : null;
+    const fromPh = req.query.from ? a2(req.query.from) : null;
+    const toPh = req.query.to ? a2(req.query.to) : null;
+    const actWhere = (col) => [
+      campPh ? `l.campaign_name = ANY(${campPh}::text[])` : null,
+      fromPh ? `${col} >= ${fromPh}` : null,
+      toPh ? `${col} <= ${toPh}` : null
+    ].filter(Boolean).map((c) => ` AND ${c}`).join('');
+
+    const { rows: dailyActionRows } = await q(
+      `WITH actions AS (
+         SELECT date_trunc('day', a.created_at) AS day,
+           CASE a.kind WHEN 'moved' THEN 'moves'
+                       WHEN 'contacted' THEN 'contacts'
+                       WHEN 'task_done' THEN 'tasks_done'
+                       WHEN 'task_added' THEN 'tasks_added'
+                       ELSE a.kind END AS type
+         FROM activity a JOIN leads l ON l.id = a.lead_id
+         WHERE a.kind IN ('moved','contacted','task_done','task_added')${actWhere('a.created_at')}
+         UNION ALL
+         SELECT date_trunc('day', m.created_at), 'messages_sent'
+         FROM messages m JOIN leads l ON l.id = m.lead_id
+         WHERE m.direction = 'out'${actWhere('m.created_at')}
+         UNION ALL
+         SELECT date_trunc('day', r.created_at), 'remarks'
+         FROM remarks r JOIN leads l ON l.id = r.lead_id
+         WHERE true${actWhere('r.created_at')}
+       )
+       SELECT to_char(day, 'YYYY-MM-DD') AS date, type, count(*)::int AS count
+       FROM actions GROUP BY day, type ORDER BY day`,
+      p2
+    );
+
+    const dayMap = new Map();
+    for (const r of dailyActionRows) {
+      const d = dayMap.get(r.date) || { date: r.date, moves: 0, contacts: 0, messages_sent: 0, tasks_done: 0, tasks_added: 0, remarks: 0, total: 0 };
+      d[r.type] = r.count;
+      d.total += r.count;
+      dayMap.set(r.date, d);
+    }
+    const daily_actions = [...dayMap.values()];
+    const actionsTotal = daily_actions.reduce((a, d) => a + d.total, 0);
+    const busiest = daily_actions.reduce((best, d) => (!best || d.total > best.total ? d : best), null);
+
     // Funnel: ordered non-lost stages with conversion % to the next.
     const funnelStages = byStage.filter((s) => !s.is_lost);
     const funnel = funnelStages.map((s, i) => {
@@ -283,7 +332,14 @@ leadsRouter.get('/analytics', async (req, res, next) => {
       by_source: bySource.rows,
       by_campaign: byCampaign.rows,
       velocity: velocity.rows[0],
-      stale: stale.rows[0].count
+      stale: stale.rows[0].count,
+      daily_actions,
+      actions: {
+        total: actionsTotal,
+        active_days: daily_actions.length,
+        per_active_day: daily_actions.length ? actionsTotal / daily_actions.length : 0,
+        busiest_day: busiest ? { date: busiest.date, total: busiest.total } : null
+      }
     });
   } catch (e) {
     next(e);

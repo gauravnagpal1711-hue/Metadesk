@@ -113,6 +113,8 @@ export default function Insights({ campaigns = [], syncSignal }) {
         </div>
       </div>
 
+      <DailyActivity data={data} />
+
       <div className="panel">
         <h3>Funnel</h3>
         <div className="funnel">
@@ -173,6 +175,74 @@ export default function Insights({ campaigns = [], syncSignal }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function DailyActivity({ data }) {
+  const rows = data.daily_actions || [];
+  const a = data.actions || {};
+  const max = Math.max(1, ...rows.map((d) => d.total));
+  const fmtDay = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString([], { day: 'numeric', month: 'short' });
+
+  return (
+    <div className="panel">
+      <h3>Daily activity</h3>
+      {rows.length === 0 ? (
+        <div className="empty-mini">No actions logged in this range yet. Stage moves, logged contacts, sent messages, completed tasks and remarks show up here.</div>
+      ) : (
+        <>
+          <div className="kpi-row" style={{ gridTemplateColumns: 'repeat(4, minmax(0,1fr))', marginBottom: 14 }}>
+            <div className="kpi"><div className="k">Actions in range</div><div className="v">{a.total}</div></div>
+            <div className="kpi"><div className="k">Active days</div><div className="v">{a.active_days}</div></div>
+            <div className="kpi"><div className="k">Avg / active day</div><div className="v">{a.per_active_day ? a.per_active_day.toFixed(1) : '—'}</div></div>
+            <div className="kpi">
+              <div className="k">Busiest day</div>
+              <div className="v">{a.busiest_day ? a.busiest_day.total : '—'} <span className="sub">{a.busiest_day ? fmtDay(a.busiest_day.date) : ''}</span></div>
+            </div>
+          </div>
+
+          <div className="scroll-x">
+            <div className="day-bars">
+              {rows.map((d) => (
+                <div
+                  key={d.date}
+                  className="day-bar"
+                  title={`${fmtDay(d.date)} — ${d.total} actions\nmoves ${d.moves} · contacts ${d.contacts} · messages ${d.messages_sent} · tasks done ${d.tasks_done} · notes ${d.remarks + d.tasks_added}`}
+                >
+                  <div className="day-bar-track">
+                    <div className="day-bar-fill" style={{ height: `${(d.total / max) * 100}%` }} />
+                  </div>
+                  <div className="day-bar-label">{new Date(`${d.date}T00:00:00`).getDate()}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="scroll-x" style={{ marginTop: 12 }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Date</th><th>Moves</th><th>Contacts</th><th>Messages</th><th>Tasks done</th><th>Notes</th><th>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...rows].reverse().map((d) => (
+                  <tr key={d.date}>
+                    <td style={{ whiteSpace: 'nowrap' }}>{fmtDay(d.date)}</td>
+                    <td className="num">{d.moves || '—'}</td>
+                    <td className="num">{d.contacts || '—'}</td>
+                    <td className="num">{d.messages_sent || '—'}</td>
+                    <td className="num">{d.tasks_done || '—'}</td>
+                    <td className="num">{(d.remarks + d.tasks_added) || '—'}</td>
+                    <td className="num"><strong>{d.total}</strong></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   );
 }
