@@ -26,9 +26,12 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) return undefined;
     api.get('/meta/whatsapp-number').then((r) => setWaNumber(r.number || null)).catch(() => {});
     api.get('/meta/lead-forms').then((r) => setForms(Array.isArray(r) ? r : [])).catch(() => {});
+    const onKey = (e) => e.key === 'Escape' && setOpen(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, [open]);
 
   function pickDest(t) {
@@ -116,16 +119,8 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
     }
   }
 
-  if (!open) {
-    return (
-      <button className="btn sm" style={{ marginTop: 8 }} onClick={() => setOpen(true)}>
-        {creative.destination_type ? 'Edit campaign setup' : 'Set up for campaign'}
-      </button>
-    );
-  }
-
-  return (
-    <div style={{ marginTop: 10, borderTop: '1px solid var(--line-soft)', paddingTop: 10, display: 'grid', gap: 10 }}>
+  const body = (
+    <div style={{ display: 'grid', gap: 10 }}>
       {error && <div className="notice bad">{error}</div>}
 
       <div className="field" style={{ margin: 0 }}>
@@ -251,11 +246,41 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
           </div>
         </div>
       )}
-
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button className="btn primary sm" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
-        <button className="btn ghost sm" onClick={() => setOpen(false)}>Cancel</button>
-      </div>
     </div>
+  );
+
+  return (
+    <>
+      <button className="btn sm" style={{ marginTop: 8 }} onClick={() => setOpen(true)}>
+        {creative.destination_type ? 'Edit campaign setup' : 'Set up for campaign'}
+      </button>
+
+      {open && (
+        <>
+          <div className="scrim" onClick={() => setOpen(false)} />
+          <div style={{ position: 'fixed', inset: 0, zIndex: 42, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+            <div className="card" style={{ width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
+                <h2 style={{ margin: 0 }}>{creative.destination_type ? 'Edit campaign setup' : 'Set up for campaign'}</h2>
+                <button className="close" style={{ marginLeft: 'auto' }} onClick={() => setOpen(false)} aria-label="Close">×</button>
+              </div>
+
+              {creative.image_data && (
+                <img src={creative.image_data} alt="" style={{ width: '100%', maxHeight: 140, objectFit: 'cover', borderRadius: 8, marginBottom: 10 }} />
+              )}
+
+              {body}
+
+              <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+                <button className="btn" onClick={() => setOpen(false)}>Cancel</button>
+                <button className="btn primary" style={{ marginLeft: 'auto' }} onClick={save} disabled={busy}>
+                  {busy ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </>
   );
 }
