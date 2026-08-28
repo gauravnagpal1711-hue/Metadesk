@@ -1,6 +1,6 @@
 import express from 'express';
 import { q } from '../db.js';
-import { listLeadForms, fetchFormLeads, flattenLead, normalisePhone, metaConfigured } from '../services/meta.js';
+import { loadConnection, connConfigured, listLeadForms, fetchFormLeads, flattenLead, normalisePhone } from '../services/meta.js';
 import { sendText, sendMedia, cloudConfigured } from '../services/whatsappCloud.js';
 import { sendWebText, sendWebMedia, webStatus } from '../services/whatsappWeb.js';
 import { suggestReplies, chatProvider } from '../services/ai.js';
@@ -951,12 +951,13 @@ leadsRouter.post('/:id/messages', async (req, res, next) => {
 leadsRouter.post('/meta/sync', async (req, res, next) => {
   try {
     const uid = req.user.id;
-    if (!metaConfigured()) return res.status(400).json({ error: 'Meta is not connected.' });
-    const forms = await listLeadForms();
+    const conn = await loadConnection(uid);
+    if (!connConfigured(conn)) return res.status(400).json({ error: 'Meta is not connected.' });
+    const forms = await listLeadForms(conn);
     const { rows: firstStage } = await q('SELECT id FROM stages WHERE user_id = $1 ORDER BY position LIMIT 1', [uid]);
     let count = 0;
     for (const form of forms) {
-      const leads = await fetchFormLeads(form.id);
+      const leads = await fetchFormLeads(conn, form.id);
       for (const raw of leads) {
         const flat = flattenLead(raw);
         const wantsWhatsApp = JSON.stringify(flat.fields).toLowerCase().includes('whatsapp');

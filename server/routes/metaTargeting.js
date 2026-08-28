@@ -1,5 +1,7 @@
 import express from 'express';
 import {
+  loadConnection,
+  connConfigured,
   searchGeo,
   searchInterests,
   resolveWhatsappNumber,
@@ -8,22 +10,22 @@ import {
   setShopLocation,
   getPageInfo,
   listLeadForms,
-  createLeadForm,
-  metaConfigured
+  createLeadForm
 } from '../services/meta.js';
 
 export const metaTargetingRouter = express.Router();
 
 /**
  * Lookups that let the in-app campaign builder ask for cities / interests /
- * forms in plain language instead of raw Meta IDs. Everything here is a
- * read except POST /lead-forms, which creates an Instant Form on the Page
- * (the one Meta write the app makes — the MCP connector has no such tool).
+ * forms in plain language. Everything here is a read except POST /lead-forms,
+ * which creates an Instant Form on the user's Page.
  */
 
 metaTargetingRouter.get('/geo', async (req, res, next) => {
   try {
-    res.json(await searchGeo(req.query.q || ''));
+    const conn = await loadConnection(req.user.id);
+    if (!connConfigured(conn)) return res.json([]);
+    res.json(await searchGeo(conn, req.query.q || ''));
   } catch (e) {
     next(e);
   }
@@ -31,7 +33,9 @@ metaTargetingRouter.get('/geo', async (req, res, next) => {
 
 metaTargetingRouter.get('/interests', async (req, res, next) => {
   try {
-    res.json(await searchInterests(req.query.q || ''));
+    const conn = await loadConnection(req.user.id);
+    if (!connConfigured(conn)) return res.json([]);
+    res.json(await searchInterests(conn, req.query.q || ''));
   } catch (e) {
     next(e);
   }
@@ -69,7 +73,7 @@ metaTargetingRouter.delete('/whatsapp-number', async (req, res, next) => {
 
 metaTargetingRouter.get('/page', async (req, res, next) => {
   try {
-    res.json(await getPageInfo());
+    res.json(await getPageInfo(await loadConnection(req.user.id)));
   } catch (e) {
     next(e);
   }
@@ -102,8 +106,9 @@ metaTargetingRouter.delete('/shop-location', async (req, res, next) => {
 
 metaTargetingRouter.get('/lead-forms', async (req, res, next) => {
   try {
-    if (!metaConfigured()) return res.json([]);
-    res.json(await listLeadForms());
+    const conn = await loadConnection(req.user.id);
+    if (!connConfigured(conn) || !conn.pageId) return res.json([]);
+    res.json(await listLeadForms(conn));
   } catch (e) {
     next(e);
   }
@@ -111,7 +116,7 @@ metaTargetingRouter.get('/lead-forms', async (req, res, next) => {
 
 metaTargetingRouter.post('/lead-forms', async (req, res, next) => {
   try {
-    res.json(await createLeadForm(req.body || {}));
+    res.json(await createLeadForm(await loadConnection(req.user.id), req.body || {}));
   } catch (e) {
     next(e);
   }

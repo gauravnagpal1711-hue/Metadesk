@@ -206,6 +206,28 @@ await cannotWrite('POST', `/api/leads/${a.leadId}/remarks`, { body: 'x' }, 'B ca
 await cannotWrite('POST', `/api/leads/${a.leadId}/messages`, { body: 'x' }, 'B cannot message A lead');
 await cannotWrite('POST', `/api/leads/${a.leadId}/suggest-replies`, undefined, 'B cannot suggest-replies on A lead');
 
+// ---- Meta connection isolation --------------------------------------
+console.log('\nMeta connection isolation');
+{
+  const { rows: ua } = await q('SELECT id FROM users WHERE username = $1', ['isoA']);
+  await q(
+    `INSERT INTO meta_connections (user_id, access_token, fb_name, ad_account_id, page_id)
+     VALUES ($1, 'A-secret-token', 'A FB', 'act_111', 'pageA')
+     ON CONFLICT (user_id) DO UPDATE SET access_token = EXCLUDED.access_token`,
+    [ua[0].id]
+  );
+  const sa = await call(A, 'GET', '/api/facebook/status');
+  const sb = await call(B, 'GET', '/api/facebook/status');
+  expect(sa.json.connection?.hasToken === true && sa.json.connection?.adAccountId === 'act_111', 'A facebook/status shows A connection');
+  expect(!sb.json.connection?.hasToken && !sb.json.connection?.adAccountId, 'B facebook/status shows NO connection', JSON.stringify(sb.json.connection));
+  const ca = await call(A, 'GET', '/api/campaigns/status');
+  const cb = await call(B, 'GET', '/api/campaigns/status');
+  expect(ca.json.account === 'act_111', 'A campaigns/status account is A\'s');
+  expect(cb.json.connected === false && !cb.json.account, 'B campaigns/status not connected');
+  // token never leaves the server
+  expect(!JSON.stringify(sa.json).includes('A-secret-token'), 'A facebook/status does not leak the access token');
+}
+
 // ---- sanity: A still sees its own stuff -------------------------------
 console.log('\nself-access sanity');
 expect(await listContains(A, '/api/creatives', (r) => r.id === a.creativeId), 'A sees own creative');

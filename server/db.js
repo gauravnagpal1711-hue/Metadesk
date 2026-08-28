@@ -96,6 +96,23 @@ export async function initDb() {
       console.log('settings primary key is now (user_id, key).');
     }
 
+    // Stage 3: move the legacy per-user meta_connection settings blob into the
+    // dedicated meta_connections table.
+    const { rows: legacyConns } = await q(`SELECT user_id, value FROM settings WHERE key = 'meta_connection'`);
+    for (const row of legacyConns) {
+      const c = row.value || {};
+      if (!c.accessToken) continue;
+      await q(
+        `INSERT INTO meta_connections (user_id, access_token, fb_user_id, fb_name, ad_account_id, page_id, page_token)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (user_id) DO NOTHING`,
+        [row.user_id, c.accessToken, c.userId || null, c.name || null, c.adAccountId || null, c.pageId || null, c.pageToken || null]
+      );
+    }
+    if (legacyConns.length) {
+      await q(`DELETE FROM settings WHERE key = 'meta_connection'`);
+      console.log(`Migrated ${legacyConns.length} Meta connection(s) into meta_connections.`);
+    }
+
     await seedStagesForUser(firstUserId);
 
     // Legacy one-time stage migrations, now scoped to the first user only.

@@ -15,8 +15,8 @@ import { campaignEditsRouter } from './routes/campaignEdits.js';
 import { metaTargetingRouter } from './routes/metaTargeting.js';
 import { whatsappRouter } from './routes/whatsapp.js';
 import { reachUsRouter } from './routes/reachUs.js';
-import { facebookRouter, restoreConnection } from './routes/facebook.js';
-import { listCampaigns, listLeadForms, fetchFormLeads, flattenLead, normalisePhone, metaConfigured, getConnection } from './services/meta.js';
+import { facebookRouter } from './routes/facebook.js';
+import { loadConnection, connConfigured, listCampaigns, listLeadForms, fetchFormLeads, flattenLead, normalisePhone } from './services/meta.js';
 import { startWeb } from './services/whatsappWeb.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -66,16 +66,24 @@ app.use((err, req, res, next) => {
 /* ---------- background sync ---------- */
 
 async function syncEverything() {
-  if (!metaConfigured()) return;
+  // Every user who has connected a Meta account, plus the first user if the
+  // legacy env-var connection is in play.
+  const { rows: connectedUsers } = await q(
+    `SELECT u.id FROM users u
+     WHERE EXISTS (SELECT 1 FROM meta_connections m WHERE m.user_id = u.id AND m.access_token IS NOT NULL)
+        OR u.id = (SELECT id FROM users ORDER BY id LIMIT 1)`
+  );
+  for (const { id: uid } of connectedUsers) {
+    await syncTenant(uid).catch((e) => console.error(`Sync failed for user ${uid}:`, e.message));
+  }
+}
 
-  // TODO(stage 3): loop every user with a connected Meta account. Today there is
-  // one global connection, so the sync writes into the first user's workspace.
-  const { rows: firstU } = await q('SELECT id FROM users ORDER BY id LIMIT 1');
-  const uid = firstU[0]?.id;
-  if (!uid) return;
+async function syncTenant(uid) {
+  const conn = await loadConnection(uid);
+  if (!connConfigured(conn)) return;
 
   try {
-    const campaigns = await listCampaigns();
+    const campaigns = await listCampaigns(conn);
     for (const c of campaigns) {
       await q(
         `INSERT INTO campaigns (id,user_id,name,objective,status,effective_status,daily_budget,lifetime_budget,
@@ -95,15 +103,13 @@ async function syncEverything() {
     console.error('Campaign sync failed:', e.message);
   }
 
-  // The page can come from META_PAGE_ID (old manual setup) or, more commonly now,
-  // from the Facebook OAuth connection saved in the database.
-  const pageId = process.env.META_PAGE_ID || getConnection().pageId;
+  const pageId = conn.pageId || process.env.META_PAGE_ID;
   if (!pageId) return;
   try {
-    const forms = await listLeadForms(pageId);
+    const forms = await listLeadForms(conn, pageId);
     const { rows: firstStage } = await q('SELECT id FROM stages WHERE user_id = $1 ORDER BY position LIMIT 1', [uid]);
     for (const form of forms) {
-      const leads = await fetchFormLeads(form.id);
+      const leads = await fetchFormLeads(conn, form.id);
       for (const raw of leads) {
         const flat = flattenLead(raw);
         const wantsWhatsApp = JSON.stringify(flat.fields).toLowerCase().includes('whatsapp');
@@ -167,13 +173,10 @@ export { app };
 
 if (process.env.ADS_DESK_NO_BOOT !== '1') initDb()
   .then(async () => {
-    // Reload any Facebook connection saved from a previous OAuth login.
-    await restoreConnection().catch((e) => console.error('Restore connection failed:', e.message));
-
     app.listen(PORT, () => console.log(`Meta Ads Manager listening on ${PORT}`));
 
-    // Run the loop always; syncEverything() no-ops until Meta is connected,
-    // so a connection made later (via Facebook login) starts syncing on its own.
+    // Per-tenant: syncEverything() loops users with a connected Meta account and
+    // no-ops for those without, so a connection made later starts syncing on its own.
     syncEverything();
     setInterval(syncEverything, SYNC_MINUTES * 60 * 1000);
 

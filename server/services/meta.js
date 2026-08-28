@@ -1,55 +1,126 @@
 /**
- * Meta Marketing Graph API wrapper.
+ * Meta Marketing Graph API wrapper — per tenant.
  *
- * The connection (token + ad account + page) can come from two places:
- *   1. The Facebook Login flow, which saves it to the DB and calls setConnection().
- *   2. Env vars (META_ACCESS_TOKEN etc.) as a fallback for the old manual setup.
+ * Each user connects their own Facebook account. The connection (token + ad
+ * account + page) lives in the `meta_connections` table, one row per user, and
+ * is loaded with loadConnection(userId). The old env vars (META_ACCESS_TOKEN
+ * etc.) are still honoured as a fallback for the first user only.
  *
- * OAuth wins when both are present, so once you connect in-app you never touch
- * the Railway token variable again.
+ * Every Graph call takes an explicit `conn` object so nothing is shared between
+ * tenants.
  */
-import { getSetting, setSetting } from '../db.js';
+import { q, getSetting, setSetting } from '../db.js';
 
 const VERSION = process.env.META_API_VERSION || 'v21.0';
 const BASE = `https://graph.facebook.com/${VERSION}`;
 const WA_SETTING_KEY = 'campaign_wa_number';
+const SHOP_LOCATION_KEY = 'shop_location';
 
-// Populated on boot from the settings table, and whenever OAuth completes.
-let connection = {
-  accessToken: process.env.META_ACCESS_TOKEN || null,
-  adAccountId: process.env.META_AD_ACCOUNT_ID || null,
-  pageId: process.env.META_PAGE_ID || null,
-  pageToken: null,
-  name: null,
-  connectedAt: null
+/* ---------- connection storage (per user) ---------- */
+
+function envConnection() {
+  if (!process.env.META_ACCESS_TOKEN && !process.env.META_AD_ACCOUNT_ID) return null;
+  return {
+    accessToken: process.env.META_ACCESS_TOKEN || null,
+    adAccountId: process.env.META_AD_ACCOUNT_ID || null,
+    pageId: process.env.META_PAGE_ID || null,
+    pageToken: null,
+    name: null,
+    fbUserId: null,
+    connectedAt: null,
+    fromEnv: true
+  };
+}
+
+function rowToConn(r) {
+  if (!r) return null;
+  return {
+    accessToken: r.access_token || null,
+    adAccountId: r.ad_account_id || null,
+    pageId: r.page_id || null,
+    pageToken: r.page_token || null,
+    name: r.fb_name || null,
+    fbUserId: r.fb_user_id || null,
+    connectedAt: r.connected_at || null,
+    expiresAt: r.expires_at || null
+  };
+}
+
+const EMPTY_CONN = {
+  accessToken: null, adAccountId: null, pageId: null, pageToken: null,
+  name: null, fbUserId: null, connectedAt: null, expiresAt: null
 };
 
-/** Called on boot with whatever was saved, and by the OAuth callback. */
-export function setConnection(next = {}) {
-  connection = { ...connection, ...next };
+/** Load a user's Meta connection. Falls back to env vars for the first user. */
+export async function loadConnection(userId) {
+  if (!userId) return { ...EMPTY_CONN };
+  const { rows } = await q('SELECT * FROM meta_connections WHERE user_id = $1', [userId]);
+  if (rows.length) return rowToConn(rows[0]);
+  const { rows: firstU } = await q('SELECT id FROM users ORDER BY id LIMIT 1');
+  if (firstU[0]?.id === userId) {
+    const env = envConnection();
+    if (env) return env;
+  }
+  return { ...EMPTY_CONN };
 }
 
-export function getConnection() {
-  const { accessToken, ...safe } = connection;
-  return { ...safe, hasToken: Boolean(accessToken) };
+/** Merge a patch into a user's connection row. */
+export async function saveConnection(userId, patch = {}) {
+  const cur = (await q('SELECT * FROM meta_connections WHERE user_id = $1', [userId])).rows[0];
+  const next = {
+    access_token: patch.accessToken !== undefined ? patch.accessToken : cur?.access_token ?? null,
+    fb_user_id: patch.fbUserId !== undefined ? patch.fbUserId : cur?.fb_user_id ?? null,
+    fb_name: patch.name !== undefined ? patch.name : cur?.fb_name ?? null,
+    ad_account_id: patch.adAccountId !== undefined ? patch.adAccountId : cur?.ad_account_id ?? null,
+    page_id: patch.pageId !== undefined ? patch.pageId : cur?.page_id ?? null,
+    page_token: patch.pageToken !== undefined ? patch.pageToken : cur?.page_token ?? null,
+    expires_at: patch.expiresAt !== undefined ? patch.expiresAt : cur?.expires_at ?? null
+  };
+  await q(
+    `INSERT INTO meta_connections (user_id, access_token, fb_user_id, fb_name, ad_account_id, page_id, page_token, expires_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
+     ON CONFLICT (user_id) DO UPDATE SET
+       access_token=EXCLUDED.access_token, fb_user_id=EXCLUDED.fb_user_id, fb_name=EXCLUDED.fb_name,
+       ad_account_id=EXCLUDED.ad_account_id, page_id=EXCLUDED.page_id, page_token=EXCLUDED.page_token,
+       expires_at=EXCLUDED.expires_at, updated_at=now()`,
+    [userId, next.access_token, next.fb_user_id, next.fb_name, next.ad_account_id, next.page_id, next.page_token, next.expires_at]
+  );
+  return loadConnection(userId);
 }
 
-export function metaConfigured() {
-  return Boolean(connection.accessToken && connection.adAccountId);
+export async function clearConnection(userId) {
+  await q('DELETE FROM meta_connections WHERE user_id = $1', [userId]);
 }
 
-function currentToken() {
-  return connection.accessToken;
+/** True when a connection can actually call the Marketing API. */
+export function connConfigured(conn) {
+  return Boolean(conn && conn.accessToken && conn.adAccountId);
 }
 
-function accountId() {
-  const id = connection.adAccountId || '';
+/** Connection minus the token, for sending to the client. */
+export function safeConn(conn) {
+  const c = conn || EMPTY_CONN;
+  return {
+    name: c.name,
+    fbUserId: c.fbUserId,
+    adAccountId: c.adAccountId,
+    pageId: c.pageId,
+    connectedAt: c.connectedAt,
+    expiresAt: c.expiresAt ?? null,
+    hasToken: Boolean(c.accessToken)
+  };
+}
+
+/* ---------- Graph plumbing ---------- */
+
+function accountId(conn) {
+  const id = conn?.adAccountId || '';
   return id.startsWith('act_') ? id : `act_${id}`;
 }
 
-async function graph(pathname, { method = 'GET', params = {}, body, token } = {}) {
-  const useToken = token || currentToken();
-  if (!useToken) throw new Error('Meta is not connected. Open the Connect tab and sign in with Facebook.');
+async function graph(pathname, { method = 'GET', params = {}, body, token, conn } = {}) {
+  const useToken = token || conn?.accessToken;
+  if (!useToken) throw new Error('Meta is not connected. Open the Facebook tab and sign in with Facebook.');
   const url = new URL(`${BASE}/${pathname.replace(/^\//, '')}`);
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
@@ -64,20 +135,20 @@ async function graph(pathname, { method = 'GET', params = {}, body, token } = {}
   const res = await fetch(url, init);
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const msg = json?.error?.message || `Meta API returned ${res.status}`;
-    throw new Error(msg);
+    throw new Error(json?.error?.message || `Meta API returned ${res.status}`);
   }
   return json;
 }
 
-/** Every campaign in the ad account, with 30-day performance merged in. */
-export async function listCampaigns() {
-  const fields = 'id,name,objective,status,effective_status,daily_budget,lifetime_budget,created_time';
-  const campaigns = await graph(`${accountId()}/campaigns`, {
-    params: { fields, limit: 200 }
-  });
+/* ---------- campaigns ---------- */
 
-  const insights = await graph(`${accountId()}/insights`, {
+/** Every campaign in the ad account, with 30-day performance merged in. */
+export async function listCampaigns(conn) {
+  const fields = 'id,name,objective,status,effective_status,daily_budget,lifetime_budget,created_time';
+  const campaigns = await graph(`${accountId(conn)}/campaigns`, { conn, params: { fields, limit: 200 } });
+
+  const insights = await graph(`${accountId(conn)}/insights`, {
+    conn,
     params: {
       level: 'campaign',
       fields: 'campaign_id,spend,impressions,clicks,ctr,actions,cost_per_action_type',
@@ -92,10 +163,10 @@ export async function listCampaigns() {
   return (campaigns.data || []).map((c) => {
     const i = byCampaign.get(c.id) || {};
     const RESULT_ACTION_TYPES = ['onsite_conversion.messaging_conversation_started_7d', 'onsite_conversion.total_messaging_connection', 'lead'];
-        const valueFor = (type) => Number((i.actions || []).find((a) => a.action_type === type)?.value || 0);
-        const resultType = RESULT_ACTION_TYPES.find((t) => valueFor(t) > 0) || 'lead';
-        const leadAction = { value: valueFor(resultType) };
-        const leadCost = (i.cost_per_action_type || []).find((a) => a.action_type === resultType);
+    const valueFor = (type) => Number((i.actions || []).find((a) => a.action_type === type)?.value || 0);
+    const resultType = RESULT_ACTION_TYPES.find((t) => valueFor(t) > 0) || 'lead';
+    const leadAction = { value: valueFor(resultType) };
+    const leadCost = (i.cost_per_action_type || []).find((a) => a.action_type === resultType);
     return {
       id: c.id,
       name: c.name,
@@ -115,10 +186,10 @@ export async function listCampaigns() {
   });
 }
 
-/** Ad sets inside one campaign — budgets, schedule and targeting, so the edit
- *  panel can pre-fill with what the campaign already has. */
-export async function listAdSets(campaignId) {
+/** Ad sets inside one campaign. */
+export async function listAdSets(conn, campaignId) {
   const data = await graph(`${campaignId}/adsets`, {
+    conn,
     params: {
       fields: 'id,name,status,daily_budget,lifetime_budget,optimization_goal,billing_event,start_time,end_time,promoted_object,targeting',
       limit: 100
@@ -132,50 +203,44 @@ export async function listAdSets(campaignId) {
 }
 
 /** Pause / resume a campaign or ad set. status is ACTIVE or PAUSED. */
-export async function setStatus(objectId, status) {
-  return graph(objectId, { method: 'POST', params: { status } });
+export async function setStatus(conn, objectId, status) {
+  return graph(objectId, { conn, method: 'POST', params: { status } });
 }
 
 /** Budget is passed in rupees/dollars; Meta wants minor units. */
-export async function setDailyBudget(objectId, amount) {
-  return graph(objectId, {
-    method: 'POST',
-    params: { daily_budget: Math.round(Number(amount) * 100) }
-  });
+export async function setDailyBudget(conn, objectId, amount) {
+  return graph(objectId, { conn, method: 'POST', params: { daily_budget: Math.round(Number(amount) * 100) } });
 }
 
-export async function renameObject(objectId, name) {
-  return graph(objectId, { method: 'POST', params: { name } });
+export async function renameObject(conn, objectId, name) {
+  return graph(objectId, { conn, method: 'POST', params: { name } });
 }
 
 /** Every lead-gen form attached to the page. Uses the page token when we have one. */
-export async function listLeadForms(pageId) {
-  const id = pageId || connection.pageId;
-  if (!id) throw new Error('No Facebook page selected. Pick one on the Connect tab.');
+export async function listLeadForms(conn, pageId) {
+  const id = pageId || conn?.pageId;
+  if (!id) throw new Error('No Facebook page selected. Pick one on the Facebook tab.');
   const data = await graph(`${id}/leadgen_forms`, {
+    conn,
     params: { fields: 'id,name,status,leads_count,questions', limit: 200 },
-    token: connection.pageToken || undefined
+    token: conn?.pageToken || undefined
   });
   return (data.data || []).map((f) => ({
     id: f.id,
     name: f.name,
     status: f.status,
     leads_count: f.leads_count,
-    fields: (f.questions || []).map((q) => q.type)
+    fields: (f.questions || []).map((qq) => qq.type)
   }));
 }
 
-/* ---------- helpers for the in-app campaign builder (all reads except createLeadForm) ---------- */
+/* ---------- in-app campaign builder helpers ---------- */
 
-/**
- * City / region / PIN-code type-ahead. Returns Meta geo keys the ad-set
- * targeting needs; zip results also carry latitude/longitude so the client can
- * offer a "within X km of here" radius around the shop.
- */
-export async function searchGeo(qStr) {
+export async function searchGeo(conn, qStr) {
   if (!qStr || !qStr.trim()) return [];
   const isPin = /^\d{4,10}$/.test(qStr.trim());
   const data = await graph('search', {
+    conn,
     params: {
       type: 'adgeolocation',
       q: qStr.trim(),
@@ -195,9 +260,20 @@ export async function searchGeo(qStr) {
   }));
 }
 
-const SHOP_LOCATION_KEY = 'shop_location';
+export async function searchInterests(conn, qStr) {
+  if (!qStr || !qStr.trim()) return [];
+  const data = await graph('search', { conn, params: { type: 'adinterest', q: qStr.trim(), limit: 10 } });
+  return (data.data || []).map((i) => ({
+    id: i.id,
+    name: i.name,
+    audience_size: i.audience_size_lower_bound || i.audience_size || null,
+    path: i.path || []
+  }));
+}
 
-/** The shopkeeper's saved shop location — every campaign defaults to "near here". Per user. */
+/* ---------- per-user settings (no Meta call) ---------- */
+
+/** The shopkeeper's saved shop location — every campaign defaults to "near here". */
 export async function getShopLocation(userId) {
   try {
     return (await getSetting(userId, SHOP_LOCATION_KEY, null)) || null;
@@ -220,23 +296,10 @@ export async function setShopLocation(userId, loc) {
   return getShopLocation(userId);
 }
 
-/** Interest type-ahead for the Advanced targeting section. */
-export async function searchInterests(qStr) {
-  if (!qStr || !qStr.trim()) return [];
-  const data = await graph('search', { params: { type: 'adinterest', q: qStr.trim(), limit: 10 } });
-  return (data.data || []).map((i) => ({
-    id: i.id,
-    name: i.name,
-    audience_size: i.audience_size_lower_bound || i.audience_size || null,
-    path: i.path || []
-  }));
-}
-
 /**
- * Resolve the WhatsApp number leads should message. A number the user saved
- * in-app wins over auto-detection; otherwise: Page's connected number →
- * WA_DISPLAY_NUMBER env → the paired WhatsApp-Web number.
- * `manual` is true when the value came from the saved setting.
+ * Resolve the WhatsApp number leads should message for this user. A number they
+ * saved in-app wins; otherwise their Page's connected number → WA_DISPLAY_NUMBER
+ * env → the paired WhatsApp-Web number.
  */
 export async function resolveWhatsappNumber(userId) {
   try {
@@ -245,12 +308,13 @@ export async function resolveWhatsappNumber(userId) {
   } catch {
     /* settings table not ready */
   }
-  const pageId = connection.pageId;
-  if (pageId) {
+  const conn = await loadConnection(userId).catch(() => null);
+  if (conn?.pageId) {
     try {
-      const p = await graph(`${pageId}`, {
+      const p = await graph(`${conn.pageId}`, {
+        conn,
         params: { fields: 'connected_whatsapp_number,whatsapp_number' },
-        token: connection.pageToken || undefined
+        token: conn.pageToken || undefined
       });
       const n = p.connected_whatsapp_number || p.whatsapp_number;
       if (n) return { number: String(n).replace(/\D/g, ''), source: 'page', manual: false };
@@ -271,53 +335,46 @@ export async function resolveWhatsappNumber(userId) {
   return { number: null, source: null, manual: false };
 }
 
-/** Save (or clear, with null/'') the campaign WhatsApp number. Per user. */
 export async function setWhatsappNumber(userId, raw) {
   const digits = String(raw || '').replace(/\D/g, '');
   await setSetting(userId, WA_SETTING_KEY, digits || null);
   return resolveWhatsappNumber(userId);
 }
 
+/* ---------- page + lead forms ---------- */
+
 /** Page info the form flow needs: id, name, and whether lead terms are accepted. */
-export async function getPageInfo() {
-  const pageId = connection.pageId;
+export async function getPageInfo(conn) {
+  const pageId = conn?.pageId;
   if (!pageId) return { page_id: null, page_name: null, leadgen_tos_accepted: null };
   try {
     const p = await graph(`${pageId}`, {
+      conn,
       params: { fields: 'id,name,leadgen_tos_accepted' },
-      token: connection.pageToken || undefined
+      token: conn?.pageToken || undefined
     });
     return { page_id: p.id, page_name: p.name, leadgen_tos_accepted: !!p.leadgen_tos_accepted };
   } catch {
-    return { page_id: pageId, page_name: connection.name || null, leadgen_tos_accepted: null };
+    return { page_id: pageId, page_name: conn?.name || null, leadgen_tos_accepted: null };
   }
 }
 
 const QUESTION_TYPE = { name: 'FULL_NAME', phone: 'PHONE', email: 'EMAIL', city: 'CITY' };
 
-/**
- * Create an Instant Form on the connected Page. This is the ONE Graph *write*
- * the app makes — Meta's Ads MCP connector has no lead-form tool, and a
- * shopkeeper should not have to open Ads Manager. The form costs nothing, is
- * deletable, and the page token already carries pages_manage_ads. Spec fields
- * come straight from the plain-language mini-builder.
- */
-export async function createLeadForm(spec = {}) {
-  const pageId = connection.pageId;
+/** Create an Instant Form on the connected Page. The one Graph write the app makes. */
+export async function createLeadForm(conn, spec = {}) {
+  const pageId = conn?.pageId;
   if (!pageId) throw new Error('Connect a Facebook page first (Facebook tab).');
-  if (!connection.pageToken) throw new Error('Missing page access token — re-pick your page on the Facebook tab.');
+  if (!conn?.pageToken) throw new Error('Missing page access token — re-pick your page on the Facebook tab.');
 
   const wanted = Array.isArray(spec.fields) && spec.fields.length ? spec.fields : ['name', 'phone'];
   const questions = [...new Set(wanted)].map((f) => ({ type: QUESTION_TYPE[f] || 'FULL_NAME' }));
-  if (!questions.some((q) => q.type === 'PHONE')) questions.push({ type: 'PHONE' });
+  if (!questions.some((qq) => qq.type === 'PHONE')) questions.push({ type: 'PHONE' });
 
-  // Custom questions from the mini-builder: a plain label = short-text answer;
-  // a label + options = a multiple-choice question.
   for (const cq of Array.isArray(spec.custom_questions) ? spec.custom_questions : []) {
     const label = String(cq?.label || '').trim();
     if (!label) continue;
-    const opts = (Array.isArray(cq.options) ? cq.options : [])
-      .map((o) => String(o).trim()).filter(Boolean);
+    const opts = (Array.isArray(cq.options) ? cq.options : []).map((o) => String(o).trim()).filter(Boolean);
     questions.push(opts.length ? { type: 'CUSTOM', label, options: opts.map((value) => ({ value })) } : { type: 'CUSTOM', label });
   }
 
@@ -340,20 +397,17 @@ export async function createLeadForm(spec = {}) {
     }
   };
 
-  const res = await graph(`${pageId}/leadgen_forms`, { method: 'POST', body, token: connection.pageToken });
+  const res = await graph(`${pageId}/leadgen_forms`, { conn, method: 'POST', body, token: conn.pageToken });
   return { id: res.id, name: body.name };
 }
 
 /** Raw leads for one form, newest first. */
-export async function fetchFormLeads(formId, since) {
+export async function fetchFormLeads(conn, formId, since) {
   const params = { fields: 'id,created_time,field_data,campaign_id,campaign_name,form_id', limit: 200 };
   if (since) params.filtering = JSON.stringify([
     { field: 'time_created', operator: 'GREATER_THAN', value: Math.floor(new Date(since).getTime() / 1000) }
   ]);
-  const data = await graph(`${formId}/leads`, {
-    params,
-    token: connection.pageToken || undefined
-  });
+  const data = await graph(`${formId}/leads`, { conn, params, token: conn?.pageToken || undefined });
   return data.data || [];
 }
 
