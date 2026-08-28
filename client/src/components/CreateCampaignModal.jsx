@@ -129,7 +129,11 @@ export default function CreateCampaignModal({ creatives, onClose, onSaved }) {
                     {chosen.image_data && <img src={chosen.image_data} alt="" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 8 }} />}
                     <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
                       <div><strong style={{ color: 'var(--ink)' }}>{chosen.headline || '—'}</strong></div>
-                      <div>{DEST_LABEL[chosen.destination_type] || chosen.destination_type}</div>
+                      <div>
+                        {DEST_LABEL[chosen.destination_type] || chosen.destination_type}
+                        {chosen.destination_type === 'whatsapp' && chosen.destination_value ? ` (+${chosen.destination_value})` : ''}
+                        {chosen.destination_type === 'lead_form' && chosen.link_url ? ` — ${chosen.link_url}` : ''}
+                      </div>
                     </div>
                   </div>
                 )}

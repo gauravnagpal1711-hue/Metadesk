@@ -8,8 +8,11 @@
  * OAuth wins when both are present, so once you connect in-app you never touch
  * the Railway token variable again.
  */
+import { getSetting, setSetting } from '../db.js';
+
 const VERSION = process.env.META_API_VERSION || 'v21.0';
 const BASE = `https://graph.facebook.com/${VERSION}`;
+const WA_SETTING_KEY = 'campaign_wa_number';
 
 // Populated on boot from the settings table, and whenever OAuth completes.
 let connection = {
@@ -195,8 +198,19 @@ export async function searchInterests(qStr) {
   }));
 }
 
-/** Best-effort resolve the WhatsApp number leads should message. */
+/**
+ * Resolve the WhatsApp number leads should message. A number the user saved
+ * in-app wins over auto-detection; otherwise: Page's connected number →
+ * WA_DISPLAY_NUMBER env → the paired WhatsApp-Web number.
+ * `manual` is true when the value came from the saved setting.
+ */
 export async function resolveWhatsappNumber() {
+  try {
+    const saved = await getSetting(WA_SETTING_KEY, null);
+    if (saved) return { number: String(saved).replace(/\D/g, ''), source: 'saved', manual: true };
+  } catch {
+    /* settings table not ready */
+  }
   const pageId = connection.pageId;
   if (pageId) {
     try {
@@ -205,22 +219,29 @@ export async function resolveWhatsappNumber() {
         token: connection.pageToken || undefined
       });
       const n = p.connected_whatsapp_number || p.whatsapp_number;
-      if (n) return { number: String(n).replace(/\D/g, ''), source: 'page' };
+      if (n) return { number: String(n).replace(/\D/g, ''), source: 'page', manual: false };
     } catch {
       /* page has no WA field / no permission — fall through */
     }
   }
   if (process.env.WA_DISPLAY_NUMBER) {
-    return { number: String(process.env.WA_DISPLAY_NUMBER).replace(/\D/g, ''), source: 'env' };
+    return { number: String(process.env.WA_DISPLAY_NUMBER).replace(/\D/g, ''), source: 'env', manual: false };
   }
   try {
     const { webStatus } = await import('./whatsappWeb.js');
     const me = webStatus()?.me;
-    if (me) return { number: String(me).replace(/\D/g, ''), source: 'whatsapp-web' };
+    if (me) return { number: String(me).replace(/\D/g, ''), source: 'whatsapp-web', manual: false };
   } catch {
     /* Baileys not running */
   }
-  return { number: null, source: null };
+  return { number: null, source: null, manual: false };
+}
+
+/** Save (or clear, with null/'') the campaign WhatsApp number. */
+export async function setWhatsappNumber(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  await setSetting(WA_SETTING_KEY, digits || null);
+  return resolveWhatsappNumber();
 }
 
 /** Page info the form flow needs: id, name, and whether lead terms are accepted. */

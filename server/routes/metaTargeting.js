@@ -3,6 +3,7 @@ import {
   searchGeo,
   searchInterests,
   resolveWhatsappNumber,
+  setWhatsappNumber,
   getPageInfo,
   listLeadForms,
   createLeadForm,
@@ -37,6 +38,28 @@ metaTargetingRouter.get('/interests', async (req, res, next) => {
 metaTargetingRouter.get('/whatsapp-number', async (req, res, next) => {
   try {
     res.json(await resolveWhatsappNumber());
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Save a number to use for lead campaigns when auto-detection misses. */
+metaTargetingRouter.post('/whatsapp-number', async (req, res, next) => {
+  try {
+    const digits = String(req.body?.number || '').replace(/\D/g, '');
+    if (digits && (digits.length < 10 || digits.length > 15)) {
+      return res.status(400).json({ error: 'Enter the number with country code, digits only (e.g. 919354260517).' });
+    }
+    res.json(await setWhatsappNumber(digits));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Clear the saved number and go back to auto-detection. */
+metaTargetingRouter.delete('/whatsapp-number', async (req, res, next) => {
+  try {
+    res.json(await setWhatsappNumber(null));
   } catch (e) {
     next(e);
   }

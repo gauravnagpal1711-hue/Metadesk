@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import WhatsAppNumberSetting from './WhatsAppNumberSetting.jsx';
 
 const DEFAULT_CTA = { whatsapp: 'WHATSAPP_MESSAGE', lead_form: 'SIGN_UP', website: 'LEARN_MORE' };
 const CTA_CHOICES = {
@@ -19,7 +20,6 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
   const [linkUrl, setLinkUrl] = useState(creative.link_url || '');
   const [ctaType, setCtaType] = useState(creative.cta_type || DEFAULT_CTA[creative.destination_type || 'whatsapp']);
   const [waNumber, setWaNumber] = useState(null);
-  const [waManual, setWaManual] = useState('');
   const [forms, setForms] = useState([]);
   const [newForm, setNewForm] = useState(null); // null = closed; object = builder open
   const [busy, setBusy] = useState(false);
@@ -34,12 +34,12 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
   function pickDest(t) {
     setDestType(t);
     setCtaType(DEFAULT_CTA[t]);
-    if (t === 'whatsapp') setDestValue(waManual || waNumber || '');
+    if (t === 'whatsapp') setDestValue(waNumber || '');
     if (t === 'lead_form') setDestValue('');
     if (t === 'website') setDestValue(linkUrl);
   }
 
-  const effectiveWa = (waManual || waNumber || '').replace(/\D/g, '');
+  const effectiveWa = (waNumber || '').replace(/\D/g, '');
 
   const BLANK_FORM = {
     name: label.trim() ? `${label.trim()} form` : 'New form',
@@ -131,7 +131,7 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
 
       {destType === 'whatsapp' && (
         <div className="notice" style={{ margin: 0 }}>
-          Leads message you on WhatsApp{effectiveWa ? <> at <strong>+{effectiveWa}</strong></> : ' — number not detected yet'}.
+          <WhatsAppNumberSetting compact onChange={(n) => setWaNumber(n)} />
         </div>
       )}
 
@@ -213,13 +213,6 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
               {CTA_CHOICES[destType].map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
             </select>
           </div>
-          {destType === 'whatsapp' && (
-            <div className="field" style={{ margin: 0 }}>
-              <label>Use a different WhatsApp number</label>
-              <input className="input" placeholder={waNumber || '919354260517'} value={waManual}
-                onChange={(e) => setWaManual(e.target.value.replace(/\D/g, ''))} />
-            </div>
-          )}
         </div>
       )}
 

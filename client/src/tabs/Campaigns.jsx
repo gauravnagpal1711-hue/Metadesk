@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, money, when } from '../api.js';
 import CreateCampaignModal from '../components/CreateCampaignModal.jsx';
+import WhatsAppNumberSetting from '../components/WhatsAppNumberSetting.jsx';
 
 export default function Campaigns({ rows, setRows, conn, onSynced }) {
   const [busy, setBusy] = useState(false);
@@ -71,12 +72,16 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
       )}
       {error && <div className="notice bad">{error}</div>}
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center' }}>
         <button className="btn primary" onClick={sync} disabled={busy || !conn.connected}>
           {busy ? 'Syncing…' : 'Sync from Meta'}
         </button>
         <button className="btn" onClick={() => setCreateOpen(true)}>Create campaign</button>
         {rows[0]?.synced_at && <span className="sub" style={{ color: 'var(--muted)' }}>Updated {when(rows[0].synced_at)}</span>}
+      </div>
+
+      <div className="card" style={{ marginBottom: 14, padding: '10px 14px' }}>
+        <WhatsAppNumberSetting />
       </div>
 
       {rows.length === 0 ? (
