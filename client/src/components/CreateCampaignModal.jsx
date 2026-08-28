@@ -18,31 +18,71 @@ const OPT_GOALS = {
   website: [['LINK_CLICKS', 'More clicks (default)'], ['LANDING_PAGE_VIEWS', 'More page views'], ['REACH', 'Reach more people']]
 };
 
-/** Assembles a campaign brief in plain language. No Meta call — Claude Code's
- *  MCP connector creates the real campaign from the saved brief. */
-export default function CreateCampaignModal({ creatives, onClose, onSaved }) {
+function toDatetimeLocal(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Turn a creative's saved campaign_defaults blob back into this form's fields. */
+function fromDefaults(d) {
+  const a = (d && d.audience) || {};
+  return {
+    budget: d?.daily_budget != null ? d.daily_budget : 400,
+    loc: {
+      mode: a.location_mode || 'nearby',
+      center: a.radius_center || null,
+      radius_km: a.radius_km || 5,
+      cities: Array.isArray(a.locations) ? a.locations : [],
+      who: a.who || 'residents'
+    },
+    startMode: d?.start_at ? 'date' : 'now',
+    startAt: d?.start_at ? toDatetimeLocal(d.start_at) : '',
+    endAt: d?.end_at ? toDatetimeLocal(d.end_at) : '',
+    ageMin: a.age_min ?? 18,
+    ageMax: a.age_max ?? 65,
+    genders: Array.isArray(a.genders) && a.genders.length ? a.genders : ['all'],
+    interests: Array.isArray(a.interests) ? a.interests : [],
+    optGoal: a.advanced?.optimization_goal || '',
+    bidCap: a.advanced?.bid_cap_rupees ?? ''
+  };
+}
+
+/**
+ * Assembles a campaign brief in plain language. No Meta call — the app PATCHes
+ * the chosen creative with these details (campaign_defaults) so they travel with
+ * the artwork and pre-fill next time, and the server keeps one brief per creative
+ * in step. Claude Code's MCP connector creates the real campaign from the brief.
+ */
+export default function CreateCampaignModal({ creatives, initialCreativeId, onClose, onSaved }) {
   const ready = useMemo(
     () => creatives.filter((c) => c.status === 'approved' && c.destination_type && c.destination_value),
     [creatives]
   );
 
-  const [creativeId, setCreativeId] = useState(ready[0]?.id || '');
+  const first = ready.find((c) => c.id === Number(initialCreativeId)) || ready[0];
+  const [creativeId, setCreativeId] = useState(first?.id || '');
   const chosen = ready.find((c) => c.id === Number(creativeId));
 
-  const [name, setName] = useState(ready[0]?.label || ready[0]?.headline || '');
-  const [budget, setBudget] = useState(400);
-  const [loc, setLoc] = useState(BLANK_LOC);
-  const [startMode, setStartMode] = useState('now');
-  const [startAt, setStartAt] = useState('');
-  const [endAt, setEndAt] = useState('');
+  const seed = fromDefaults(first?.campaign_defaults);
+  const [name, setName] = useState(
+    first?.campaign_defaults?.name || first?.label || first?.headline || ''
+  );
+  const [budget, setBudget] = useState(seed.budget);
+  const [loc, setLoc] = useState(seed.loc);
+  const [startMode, setStartMode] = useState(seed.startMode);
+  const [startAt, setStartAt] = useState(seed.startAt);
+  const [endAt, setEndAt] = useState(seed.endAt);
 
   const [advanced, setAdvanced] = useState(false);
-  const [ageMin, setAgeMin] = useState(18);
-  const [ageMax, setAgeMax] = useState(65);
-  const [genders, setGenders] = useState(['all']);
-  const [interests, setInterests] = useState([]);
-  const [optGoal, setOptGoal] = useState('');
-  const [bidCap, setBidCap] = useState('');
+  const [ageMin, setAgeMin] = useState(seed.ageMin);
+  const [ageMax, setAgeMax] = useState(seed.ageMax);
+  const [genders, setGenders] = useState(seed.genders);
+  const [interests, setInterests] = useState(seed.interests);
+  const [optGoal, setOptGoal] = useState(seed.optGoal);
+  const [bidCap, setBidCap] = useState(seed.bidCap);
 
   const [page, setPage] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -58,8 +98,23 @@ export default function CreateCampaignModal({ creatives, onClose, onSaved }) {
   function pickCreative(id) {
     setCreativeId(id);
     const c = ready.find((x) => x.id === Number(id));
-    if (c && (!name.trim() || name === chosen?.label || name === chosen?.headline)) {
-      setName(c.label || c.headline || '');
+    if (!c) return;
+    const d = c.campaign_defaults;
+    const s = fromDefaults(d);
+    // A creative with saved details refills the whole form; otherwise just the name.
+    setName(d?.name || c.label || c.headline || '');
+    if (d) {
+      setBudget(s.budget);
+      setLoc(s.loc);
+      setStartMode(s.startMode);
+      setStartAt(s.startAt);
+      setEndAt(s.endAt);
+      setAgeMin(s.ageMin);
+      setAgeMax(s.ageMax);
+      setGenders(s.genders);
+      setInterests(s.interests);
+      setOptGoal(s.optGoal);
+      setBidCap(s.bidCap);
     }
   }
   function toggleGender(g) {
@@ -98,15 +153,17 @@ export default function CreateCampaignModal({ creatives, onClose, onSaved }) {
           bid_cap_rupees: bidCap ? Number(bidCap) : null
         }
       };
-      const saved = await api.post('/campaign-briefs', {
+      const campaign_defaults = {
         name: name.trim(),
-        creative_id: chosen.id,
         daily_budget: Number(budget),
         audience,
         start_at: startMode === 'now' ? null : (startAt ? new Date(startAt).toISOString() : null),
         end_at: endAt ? new Date(endAt).toISOString() : null
-      });
-      onSaved(saved);
+      };
+      // Save the details onto the artwork; the server syncs this creative's brief.
+      const updated = await api.patch(`/creatives/${chosen.id}`, { campaign_defaults });
+      if (updated.brief) onSaved(updated.brief);
+      else onClose();
     } catch (e) {
       setError(e.message);
     } finally {
@@ -120,7 +177,7 @@ export default function CreateCampaignModal({ creatives, onClose, onSaved }) {
       <div style={{ position: 'fixed', inset: 0, zIndex: 42, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
         <div className="card" style={{ width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-            <h2 style={{ margin: 0 }}>Create campaign</h2>
+            <h2 style={{ margin: 0 }}>Campaign details</h2>
             <button className="close" style={{ marginLeft: 'auto' }} onClick={onClose} aria-label="Close">×</button>
           </div>
 
@@ -236,7 +293,7 @@ export default function CreateCampaignModal({ creatives, onClose, onSaved }) {
               <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                 <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
                 <button className="btn primary" style={{ marginLeft: 'auto' }} onClick={save} disabled={busy}>
-                  {busy ? 'Saving…' : 'Save brief'}
+                  {busy ? 'Saving…' : 'Save details'}
                 </button>
               </div>
             </>

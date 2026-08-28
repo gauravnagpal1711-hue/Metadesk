@@ -2,16 +2,22 @@ import { useRef, useState } from 'react';
 import { useTypeahead } from '../hooks/useTypeahead.js';
 import { useOutsideClick } from '../hooks/useOutsideClick.js';
 
-/** Optional interest targeting. `value` is [{ id, name }]. */
+/**
+ * Interest targeting — pick from Meta's list, or just type your own words
+ * (added as a note, id:null, for Claude to interpret). `value` is [{ id, name }].
+ */
 export default function InterestPicker({ value = [], onChange }) {
   const { query, setQuery, results, loading } = useTypeahead('/meta/interests');
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useOutsideClick(ref, open, () => setOpen(false));
 
+  const q = query.trim();
+  const exact = results.some((r) => r.name.toLowerCase() === q.toLowerCase());
+
   function add(i) {
-    if (value.some((v) => v.id === i.id)) return;
-    onChange([...value, { id: i.id, name: i.name }]);
+    if (value.some((v) => (i.id ? v.id === i.id : v.name.toLowerCase() === i.name.toLowerCase()))) return;
+    onChange([...value, { id: i.id ?? null, name: i.name }]);
     setQuery('');
     setOpen(false);
   }

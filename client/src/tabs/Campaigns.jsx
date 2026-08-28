@@ -4,15 +4,28 @@ import CreateCampaignModal from '../components/CreateCampaignModal.jsx';
 import CampaignEditModal from '../components/CampaignEditModal.jsx';
 import WhatsAppNumberSetting from '../components/WhatsAppNumberSetting.jsx';
 
+const BRIEF_PILL = {
+  draft: { cls: 'off', text: 'Draft' },
+  ready: { cls: 'off', text: 'Paused' },
+  queued: { cls: 'warn', text: 'Setup in Process' },
+  info_needed: { cls: 'warn', text: 'Information needed' },
+  created: { cls: 'off', text: 'Paused' },
+  live: { cls: 'good', text: 'Running' }
+};
+
 export default function Campaigns({ rows, setRows, conn, onSynced }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [drafts, setDrafts] = useState({});
   const [creatives, setCreatives] = useState([]);
   const [briefs, setBriefs] = useState([]);
   const [edits, setEdits] = useState([]);
   const [createOpen, setCreateOpen] = useState(false);
+  const [createFor, setCreateFor] = useState(null); // creative id to preselect
   const [editing, setEditing] = useState(null); // a campaign row
+  const [openQuestion, setOpenQuestion] = useState(null); // brief id whose question panel is expanded
+  const [briefBusy, setBriefBusy] = useState(null); // brief id currently mutating
 
   useEffect(() => {
     api.get('/creatives').then(setCreatives).catch(() => {});
@@ -26,6 +39,20 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
     [briefs]
   );
 
+  // Briefs that aren't yet represented by a synced Meta campaign row — shown as
+  // paused placeholder rows in the main table so a ready campaign "lands" here.
+  const syncedIds = useMemo(() => new Set(rows.map((r) => r.id)), [rows]);
+  const pendingBriefs = useMemo(
+    () => briefs.filter(
+      (b) => b.status !== 'archived' && !(b.meta_campaign_id && syncedIds.has(b.meta_campaign_id))
+    ),
+    [briefs, syncedIds]
+  );
+
+  function replaceBrief(b) {
+    setBriefs((list) => [b, ...list.filter((x) => x.id !== b.id)]);
+  }
+
   async function deleteBrief(id) {
     if (!window.confirm('Delete this campaign brief?')) return;
     try {
@@ -38,6 +65,38 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
       await api.del(`/campaign-edits/${id}`);
       setEdits((e) => e.filter((x) => x.id !== id));
     } catch (e) { setError(e.message); }
+  }
+
+  // "Set campaign" — hand a ready brief to Claude. No Meta call here.
+  async function setCampaign(brief) {
+    if (!window.confirm(`Send "${brief.name}" to Claude to build on Meta? It stays paused until you start it.`)) return;
+    setBriefBusy(brief.id);
+    setError('');
+    try {
+      const updated = await api.patch(`/campaign-briefs/${brief.id}`, { status: 'queued' });
+      replaceBrief(updated);
+      setNotice(`"${brief.name}" is queued. Tell Claude: create campaign brief #${brief.id}`);
+    } catch (e) { setError(e.message); } finally { setBriefBusy(null); }
+  }
+
+  // "Start campaign" — only for a brief Claude has already created (paused) on Meta.
+  async function startCampaign(brief) {
+    if (!brief.meta_campaign_id) return;
+    setBriefBusy(brief.id);
+    setError('');
+    try {
+      await api.patch(`/campaigns/${brief.meta_campaign_id}`, { status: 'ACTIVE' });
+      const updated = await api.patch(`/campaign-briefs/${brief.id}`, { status: 'live' });
+      replaceBrief(updated);
+      setRows((r) => r.map((x) => (x.id === brief.meta_campaign_id ? { ...x, status: 'ACTIVE', effective_status: 'ACTIVE' } : x)));
+      setNotice(`"${brief.name}" is now running.`);
+      onSynced?.();
+    } catch (e) { setError(e.message); } finally { setBriefBusy(null); }
+  }
+
+  function openDetails(creativeId) {
+    setCreateFor(creativeId || null);
+    setCreateOpen(true);
   }
 
   async function sync() {
@@ -74,6 +133,30 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
     setRows((r) => r.map((x) => (x.id === patch.id ? { ...x, ...patch } : x)));
   }
 
+  function briefAction(b) {
+    if (briefBusy === b.id) return <span className="sub" style={{ color: 'var(--muted-2)' }}>Working…</span>;
+    if (b.status === 'draft') {
+      return <button className="btn sm" onClick={() => openDetails(b.creative_id)}>Add campaign details</button>;
+    }
+    if (b.status === 'ready') {
+      return <button className="btn sm primary" onClick={() => setCampaign(b)}>Set campaign</button>;
+    }
+    if (b.status === 'queued') {
+      return <span className="sub" style={{ color: 'var(--muted)' }}>Claude is building it…</span>;
+    }
+    if (b.status === 'info_needed') {
+      return (
+        <button className="btn sm" onClick={() => setOpenQuestion((id) => (id === b.id ? null : b.id))}>
+          {openQuestion === b.id ? 'Hide question' : 'Information needed'}
+        </button>
+      );
+    }
+    if (b.status === 'created') {
+      return <button className="btn sm primary" onClick={() => startCampaign(b)}>Start campaign</button>;
+    }
+    return null;
+  }
+
   return (
     <>
       {!conn.connected && (
@@ -82,12 +165,18 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
         </div>
       )}
       {error && <div className="notice bad">{error}</div>}
+      {notice && (
+        <div className="notice" style={{ borderLeftColor: 'var(--good)' }}>
+          {notice}
+          <button className="close" style={{ marginLeft: 8 }} onClick={() => setNotice('')} aria-label="Dismiss">×</button>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center' }}>
         <button className="btn primary" onClick={sync} disabled={busy || !conn.connected}>
           {busy ? 'Syncing…' : 'Sync from Meta'}
         </button>
-        <button className="btn" onClick={() => setCreateOpen(true)}>Create campaign</button>
+        <button className="btn" onClick={() => openDetails(null)}>Create campaign</button>
         {rows[0]?.synced_at && <span className="sub" style={{ color: 'var(--muted)' }}>Updated {when(rows[0].synced_at)}</span>}
       </div>
 
@@ -95,7 +184,7 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
         <WhatsAppNumberSetting />
       </div>
 
-      {rows.length === 0 ? (
+      {rows.length === 0 && pendingBriefs.length === 0 ? (
         <div className="empty">
           <h3>No campaigns yet</h3>
           Connect your ad account and hit Sync from Meta to pull everything in.
@@ -116,6 +205,39 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
               </tr>
             </thead>
             <tbody>
+              {pendingBriefs.map((b) => {
+                const pill = BRIEF_PILL[b.status] || BRIEF_PILL.draft;
+                return (
+                  <tr key={`brief-${b.id}`}>
+                    <td>
+                      <div className="name">
+                        {b.name}
+                        <span className="tag good" style={{ marginLeft: 6 }}>Ads Desk</span>
+                      </div>
+                      <div className="num" style={{ fontSize: 10.5, color: 'var(--muted-2)', marginTop: 2 }}>brief #{b.id}</div>
+                      {b.status === 'info_needed' && openQuestion === b.id && (
+                        <div className="notice" style={{ margin: '8px 0 2px', borderLeftColor: 'var(--warn)' }}>
+                          <strong>Claude needs to know:</strong>
+                          <div style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>{b.notes || 'Claude has a question — check your Claude Code chat.'}</div>
+                          <div className="sub" style={{ color: 'var(--muted-2)', marginTop: 6 }}>
+                            Answer in your Claude Code chat, then it will continue with <code>create campaign brief #{b.id}</code>.
+                          </div>
+                        </div>
+                      )}
+                    </td>
+                    <td><span className={`tag ${pill.cls}`}>{pill.text}</span></td>
+                    <td className="num" style={{ textAlign: 'right' }}>{b.daily_budget ? `₹${money(b.daily_budget)}` : '—'}</td>
+                    <td className="num" style={{ textAlign: 'right' }}>—</td>
+                    <td className="num" style={{ textAlign: 'right' }}>—</td>
+                    <td className="num" style={{ textAlign: 'right' }}>—</td>
+                    <td className="num" style={{ textAlign: 'right' }}>—</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {briefAction(b)}{' '}
+                      <button className="btn sm ghost danger" onClick={() => deleteBrief(b.id)}>Delete</button>
+                    </td>
+                  </tr>
+                );
+              })}
               {rows.map((c) => (
                 <tr key={c.id}>
                   <td>
@@ -157,36 +279,21 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
         </div>
       )}
 
-      {(briefs.length > 0 || edits.length > 0) && (
+      {edits.length > 0 && (
         <div style={{ marginTop: 28 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
             <h2 style={{ margin: 0, fontSize: 16 }}>Campaign changes</h2>
-            <span className="mono-label">{briefs.length + edits.length}</span>
+            <span className="mono-label">{edits.length}</span>
           </div>
           <div className="scroll-x">
             <table className="table">
               <thead>
-                <tr><th>What</th><th style={{ textAlign: 'right' }}>Daily ₹</th><th>Status</th><th>Next step</th><th></th></tr>
+                <tr><th>What</th><th>Status</th><th>Next step</th><th></th></tr>
               </thead>
               <tbody>
-                {briefs.map((b) => (
-                  <tr key={`b${b.id}`}>
-                    <td><div className="name">New: {b.name}</div><div className="num" style={{ fontSize: 10.5, color: 'var(--muted-2)' }}>brief #{b.id}</div></td>
-                    <td className="num" style={{ textAlign: 'right' }}>{b.daily_budget ? `₹${money(b.daily_budget)}` : '—'}</td>
-                    <td><span className={`tag ${b.status === 'created' || b.status === 'live' ? 'good' : b.status === 'ready' ? 'warn' : 'off'}`}>{b.status}</span></td>
-                    <td style={{ fontSize: 12.5 }}>
-                      {b.status === 'ready' && <>Tell Claude: <code>create campaign brief #{b.id}</code></>}
-                      {b.status === 'draft' && 'Finish the brief (needs an approved creative + budget)'}
-                      {b.status === 'created' && <>PAUSED on Meta · <span className="num">{b.meta_campaign_id}</span> · say <code>turn on brief #{b.id}</code></>}
-                      {b.status === 'live' && <>Live · <span className="num">{b.meta_campaign_id}</span></>}
-                    </td>
-                    <td style={{ textAlign: 'right' }}><button className="btn sm ghost danger" onClick={() => deleteBrief(b.id)}>Delete</button></td>
-                  </tr>
-                ))}
                 {edits.map((e) => (
                   <tr key={`e${e.id}`}>
                     <td><div className="name">Edit: {e.campaign_name || e.meta_campaign_id}</div><div className="num" style={{ fontSize: 10.5, color: 'var(--muted-2)' }}>change #{e.id}</div></td>
-                    <td className="num" style={{ textAlign: 'right' }}>—</td>
                     <td><span className={`tag ${e.status === 'applied' ? 'good' : e.status === 'ready' ? 'warn' : 'off'}`}>{e.status}</span></td>
                     <td style={{ fontSize: 12.5 }}>
                       {e.status === 'ready' && <>Tell Claude: <code>apply campaign edit #{e.id}</code></>}
@@ -204,8 +311,18 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
       {createOpen && (
         <CreateCampaignModal
           creatives={creatives}
-          onClose={() => setCreateOpen(false)}
-          onSaved={(saved) => { setBriefs((b) => [saved, ...b]); setCreateOpen(false); }}
+          initialCreativeId={createFor}
+          onClose={() => { setCreateOpen(false); setCreateFor(null); }}
+          onSaved={(saved) => {
+            replaceBrief(saved);
+            setCreateOpen(false);
+            setCreateFor(null);
+            setNotice(
+              saved.status === 'ready'
+                ? `"${saved.name}" is ready. It's listed below as Paused — press Set campaign to send it to Claude, then Start campaign once it's built on Meta.`
+                : `Saved. Add a daily budget and a location to make "${saved.name}" ready.`
+            );
+          }}
         />
       )}
 

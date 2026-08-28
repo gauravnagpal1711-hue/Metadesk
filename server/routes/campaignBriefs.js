@@ -11,15 +11,91 @@ export const campaignBriefsRouter = express.Router();
  */
 
 const CREATIVE_FIELDS =
-  'id, kind, headline, primary_text, cta, label, cta_type, destination_type, destination_value, link_url, image_data, status';
+  'id, kind, headline, primary_text, cta, label, cta_type, destination_type, destination_value, link_url, image_data, status, campaign_defaults';
+
+// Once the user has pressed "Set campaign" (queued), Claude has asked a question
+// (info_needed) or built it on Meta (created/live), the app stops recomputing
+// the brief's status — only an explicit status change moves it from here.
+const LOCKED_STATUSES = ['queued', 'info_needed', 'created', 'live', 'archived'];
 
 /** A brief is "ready" to hand to Claude when it has a name, a budget, and a
  *  campaign-ready creative (approved + a destination). */
 function computeStatus(brief, creative) {
-  if (['created', 'live', 'archived'].includes(brief.status)) return brief.status;
+  if (LOCKED_STATUSES.includes(brief.status)) return brief.status;
   const creativeReady =
     creative && creative.status === 'approved' && creative.destination_type && creative.destination_value;
   return brief.name && brief.daily_budget && creativeReady ? 'ready' : 'draft';
+}
+
+/** Does the saved audience name a place to advertise? */
+function hasLocation(audience) {
+  if (!audience || typeof audience !== 'object') return false;
+  if (audience.location_mode === 'cities') return Array.isArray(audience.locations) && audience.locations.length > 0;
+  return !!audience.radius_center;
+}
+
+/**
+ * Keep exactly one brief per creative in step with that creative's state.
+ * Call after any change to a creative. A brief the user or Claude has already
+ * pushed further (queued / created / live / archived) is left untouched.
+ * Returns the brief (or null if the creative isn't campaign-bound yet).
+ */
+export async function syncBriefForCreative(creativeId) {
+  if (!creativeId) return null;
+  const { rows: cr } = await q(
+    `SELECT id, label, headline, status, destination_type, destination_value, campaign_defaults
+       FROM creatives WHERE id = $1`,
+    [creativeId]
+  );
+  const creative = cr[0];
+  if (!creative) return null;
+
+  const { rows: br } = await q(
+    'SELECT * FROM campaign_briefs WHERE creative_id = $1 ORDER BY id DESC LIMIT 1',
+    [creativeId]
+  );
+  const brief = br[0] || null;
+  if (brief && LOCKED_STATUSES.includes(brief.status)) return brief;
+
+  const campaignBound =
+    creative.status === 'approved' && creative.destination_type && creative.destination_value;
+
+  if (!campaignBound) {
+    if (brief && brief.status === 'ready') {
+      const { rows } = await q(
+        "UPDATE campaign_briefs SET status = 'draft', updated_at = now() WHERE id = $1 RETURNING *",
+        [brief.id]
+      );
+      return rows[0];
+    }
+    return brief;
+  }
+
+  const d = creative.campaign_defaults || {};
+  const name =
+    (d.name && String(d.name).trim()) || creative.label || creative.headline || `Creative ${creative.id}`;
+  const daily_budget = d.daily_budget != null ? d.daily_budget : brief ? brief.daily_budget : null;
+  const audience = d.audience || (brief && brief.audience) || {};
+  const start_at = d.start_at !== undefined ? d.start_at : brief ? brief.start_at : null;
+  const end_at = d.end_at !== undefined ? d.end_at : brief ? brief.end_at : null;
+  const status = daily_budget && hasLocation(audience) ? 'ready' : 'draft';
+
+  if (brief) {
+    const { rows } = await q(
+      `UPDATE campaign_briefs SET
+         name = $2, daily_budget = $3, audience = $4, start_at = $5, end_at = $6,
+         status = $7, updated_at = now()
+       WHERE id = $1 RETURNING *`,
+      [brief.id, name, daily_budget, JSON.stringify(audience), start_at, end_at, status]
+    );
+    return rows[0];
+  }
+  const { rows } = await q(
+    `INSERT INTO campaign_briefs (name, creative_id, daily_budget, audience, start_at, end_at, status)
+     VALUES ($1, $2, $3, COALESCE($4, '{}'::jsonb), $5, $6, $7) RETURNING *`,
+    [name, creativeId, daily_budget, JSON.stringify(audience), start_at, end_at, status]
+  );
+  return rows[0];
 }
 
 campaignBriefsRouter.get('/', async (req, res, next) => {
@@ -106,9 +182,9 @@ campaignBriefsRouter.patch('/:id', async (req, res, next) => {
       meta_image_hash: b.meta_image_hash !== undefined ? b.meta_image_hash : existing.meta_image_hash
     };
 
-    // Explicit status wins (Claude Code sets 'created'/'live'); otherwise recompute.
+    // Explicit status wins (the app sets 'queued'; Claude sets 'created'/'live'); otherwise recompute.
     let status = b.status !== undefined ? b.status : existing.status;
-    if (b.status === undefined && !['created', 'live', 'archived'].includes(existing.status)) {
+    if (b.status === undefined && !LOCKED_STATUSES.includes(existing.status)) {
       let creative = null;
       if (next_.creative_id) {
         const { rows: cr } = await q('SELECT status, destination_type, destination_value FROM creatives WHERE id = $1', [next_.creative_id]);

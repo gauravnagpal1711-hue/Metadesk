@@ -3,6 +3,7 @@ import { q } from '../db.js';
 import { listLeadForms, fetchFormLeads, flattenLead, normalisePhone, metaConfigured } from '../services/meta.js';
 import { sendText, sendMedia, cloudConfigured } from '../services/whatsappCloud.js';
 import { sendWebText, sendWebMedia, webStatus } from '../services/whatsappWeb.js';
+import { suggestReplies, chatProvider } from '../services/ai.js';
 
 export const leadsRouter = express.Router();
 
@@ -554,6 +555,66 @@ leadsRouter.get('/:id', async (req, res, next) => {
       [req.params.id]
     );
     res.json({ lead: rows[0], messages, remarks, activity, tasks });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * AI-suggested WhatsApp replies for this lead's conversation, written to match
+ * how the user replies by hand in other lead chats.
+ */
+leadsRouter.post('/:id/suggest-replies', async (req, res, next) => {
+  try {
+    if (!chatProvider()) return res.status(400).json({ error: 'Add ANTHROPIC_API_KEY to enable reply suggestions.' });
+
+    const { rows: leadRows } = await q(
+      `SELECT l.id, l.full_name, l.city, l.campaign_name, s.name AS stage_name
+       FROM leads l LEFT JOIN stages s ON s.id = l.stage_id
+       WHERE l.id = $1 AND l.is_meta_verified = true`,
+      [req.params.id]
+    );
+    if (!leadRows.length) return res.status(404).json({ error: 'That lead no longer exists.' });
+    const lead = leadRows[0];
+
+    const { rows: convo } = await q(
+      `SELECT direction, body FROM (
+         SELECT direction, body, created_at FROM messages
+         WHERE lead_id = $1 AND body IS NOT NULL AND btrim(body) <> ''
+         ORDER BY created_at DESC LIMIT 60
+       ) t ORDER BY created_at ASC`,
+      [req.params.id]
+    );
+    if (convo.length === 0) return res.status(400).json({ error: 'No conversation yet to work from.' });
+
+    // The user's own (incoming -> their reply) pairs from OTHER leads — the
+    // signal for "reply the way they actually talk".
+    const { rows: others } = await q(
+      `SELECT lead_id, direction, body FROM (
+         SELECT lead_id, direction, body, created_at FROM messages
+         WHERE lead_id <> $1 AND body IS NOT NULL AND btrim(body) <> ''
+         ORDER BY created_at DESC LIMIT 500
+       ) recent ORDER BY lead_id ASC, created_at ASC`,
+      [req.params.id]
+    );
+    const examples = [];
+    let prevLead = null;
+    let prevIn = null;
+    for (const m of others) {
+      if (m.lead_id !== prevLead) { prevLead = m.lead_id; prevIn = null; }
+      if (m.direction === 'in') { prevIn = m.body; continue; }
+      if (m.direction === 'out' && prevIn) {
+        examples.push({ lead: prevIn.slice(0, 400), reply: m.body.slice(0, 400) });
+        prevIn = null;
+      }
+    }
+
+    const suggestions = await suggestReplies({
+      conversation: convo,
+      examples: examples.slice(-12),
+      lead: { name: lead.full_name, stage: lead.stage_name, campaign: lead.campaign_name, city: lead.city }
+    });
+    res.json({ suggestions });
   } catch (e) {
     next(e);
   }

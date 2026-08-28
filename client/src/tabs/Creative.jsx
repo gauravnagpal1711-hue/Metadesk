@@ -130,9 +130,17 @@ export default function Creative() {
     setGallery((g) => g.filter((c) => c.id !== id));
   }
 
+  const someReady = gallery.some(isCampaignReady);
+
   return (
     <>
       {error && <div className="notice bad">{error}</div>}
+      {someReady && (
+        <div className="notice" style={{ borderLeftColor: 'var(--good)' }}>
+          A creative is campaign-ready. Go to the <strong>Campaigns</strong> tab and press <strong>Set campaign</strong> to
+          send it to Claude, then <strong>Start campaign</strong> once Claude has built it on Meta.
+        </div>
+      )}
 
       <div className="grid2">
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>

@@ -187,6 +187,72 @@ next(e);
 }
 });
 
+/* ---------- quick-reply message templates ----------
+ * Saved WhatsApp replies reused from the lead conversation. Stored as one
+ * settings blob: [{ id, label, body }]. Bodies may contain {name} / {first_name}
+ * / {phone} / {city} placeholders, filled in by the client on insert.
+ */
+
+function cleanTemplate(t) {
+  return {
+    id: t.id || `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`,
+    label: String(t.label || '').trim().slice(0, 80),
+    body: String(t.body || '').trim().slice(0, 4000)
+  };
+}
+
+whatsappRouter.get('/templates', async (req, res, next) => {
+  try {
+    res.json(await getSetting('wa_message_templates', []));
+  } catch (e) {
+    next(e);
+  }
+});
+
+whatsappRouter.post('/templates', async (req, res, next) => {
+  try {
+    if (!String(req.body?.body || '').trim()) return res.status(400).json({ error: 'Template text is required.' });
+    const list = await getSetting('wa_message_templates', []);
+    const updated = [...list, cleanTemplate(req.body)];
+    await setSetting('wa_message_templates', updated);
+    res.json(updated);
+  } catch (e) {
+    next(e);
+  }
+});
+
+whatsappRouter.patch('/templates/:id', async (req, res, next) => {
+  try {
+    const list = await getSetting('wa_message_templates', []);
+    let found = false;
+    const updated = list.map((t) => {
+      if (t.id !== req.params.id) return t;
+      found = true;
+      return cleanTemplate({
+        id: t.id,
+        label: req.body?.label !== undefined ? req.body.label : t.label,
+        body: req.body?.body !== undefined ? req.body.body : t.body
+      });
+    });
+    if (!found) return res.status(404).json({ error: 'Template not found.' });
+    await setSetting('wa_message_templates', updated);
+    res.json(updated);
+  } catch (e) {
+    next(e);
+  }
+});
+
+whatsappRouter.delete('/templates/:id', async (req, res, next) => {
+  try {
+    const list = await getSetting('wa_message_templates', []);
+    const updated = list.filter((t) => t.id !== req.params.id);
+    await setSetting('wa_message_templates', updated);
+    res.json(updated);
+  } catch (e) {
+    next(e);
+  }
+});
+
 /** Start pairing — poll /status until it flips to connected. */
 whatsappRouter.post('/web/connect', async (req, res, next) => {
 try {

@@ -24,6 +24,9 @@ ALTER TABLE creatives ADD COLUMN IF NOT EXISTS cta_type TEXT;
 ALTER TABLE creatives ADD COLUMN IF NOT EXISTS destination_type TEXT;
 ALTER TABLE creatives ADD COLUMN IF NOT EXISTS destination_value TEXT;
 ALTER TABLE creatives ADD COLUMN IF NOT EXISTS link_url TEXT;
+-- Campaign details entered up front in "Set up for campaign" / Create campaign,
+-- kept with the artwork so they pre-fill next time. { name, daily_budget, audience, start_at, end_at }
+ALTER TABLE creatives ADD COLUMN IF NOT EXISTS campaign_defaults JSONB;
 
 CREATE TABLE IF NOT EXISTS campaigns (
 id TEXT PRIMARY KEY, -- Meta campaign id
@@ -194,7 +197,9 @@ daily_budget NUMERIC,
 audience JSONB NOT NULL DEFAULT '{}'::jsonb, -- { cities:[], radius_km, age_min, age_max, genders:[] }
 start_at TIMESTAMPTZ,
 end_at TIMESTAMPTZ,
-status TEXT NOT NULL DEFAULT 'draft', -- draft | ready | created | live | archived
+status TEXT NOT NULL DEFAULT 'draft', -- draft | ready | queued | info_needed | created | live | archived
+-- notes doubles as the message channel: when status = 'info_needed', Claude's
+-- MCP connector writes the question it needs answered here.
 meta_campaign_id TEXT,
 meta_adset_id TEXT,
 meta_creative_id TEXT,

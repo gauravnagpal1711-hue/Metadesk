@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, when } from '../api.js';
 import { bucketOf, shortDateTime } from '../lib/dateBuckets.js';
+import MessageTemplates from './MessageTemplates.jsx';
 
 const TASK_KINDS = ['todo', 'call', 'meeting', 'whatsapp', 'email'];
 
@@ -47,6 +48,8 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   const [view, setView] = useState('chat');
   const [draft, setDraft] = useState('');
   const [attachment, setAttachment] = useState(null); // { dataUrl, mime, name }
+  const [suggestions, setSuggestions] = useState([]);
+  const [suggesting, setSuggesting] = useState(false);
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
@@ -63,6 +66,9 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   }, [leadId]);
 
   useEffect(() => { load().catch((e) => setError(e.message)); }, [load]);
+
+  // Reply suggestions belong to one lead's thread — drop them when switching leads.
+  useEffect(() => { setSuggestions([]); }, [leadId]);
 
   useEffect(() => {
     if (view === 'chat') endRef.current?.scrollIntoView({ block: 'end' });
@@ -127,12 +133,27 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
       });
       setDraft('');
       setAttachment(null);
+      setSuggestions([]);
       if (fileRef.current) fileRef.current.value = '';
       await load();
     } catch (e) {
       setError(e.message);
     } finally {
       setSending(false);
+    }
+  }
+
+  async function suggestAI() {
+    setSuggesting(true);
+    setError('');
+    try {
+      const r = await api.post(`/leads/${leadId}/suggest-replies`);
+      setSuggestions(Array.isArray(r.suggestions) ? r.suggestions : []);
+      if (!r.suggestions?.length) setError('No suggestions came back — try again.');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSuggesting(false);
     }
   }
 
@@ -653,6 +674,19 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
 
         {view === 'chat' && (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {suggestions.length > 0 && (
+              <div className="wa-suggestions">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="mono-label">Suggested replies</span>
+                  <button className="btn ghost sm" style={{ marginLeft: 'auto' }} onClick={() => setSuggestions([])}>Dismiss</button>
+                </div>
+                {suggestions.map((s, i) => (
+                  <button key={i} type="button" className="wa-suggestion" onClick={() => { setDraft(s); setSuggestions([]); }}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
             {attachment && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderTop: '1px solid var(--line)', background: 'var(--surface-soft)' }}>
                 {attachment.mime.startsWith('image/') ? (
@@ -670,6 +704,19 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
               <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files?.[0])} />
               <button className="wa-icon-btn" onClick={() => fileRef.current?.click()} aria-label="Attach file" title="Attach file">
                 📎
+              </button>
+              <MessageTemplates
+                lead={lead}
+                onInsert={(text) => setDraft((d) => (d.trim() ? `${d} ${text}` : text))}
+              />
+              <button
+                className="wa-icon-btn"
+                onClick={suggestAI}
+                disabled={suggesting}
+                aria-label="Suggest replies with AI"
+                title="Suggest replies with AI"
+              >
+                {suggesting ? '…' : '✨'}
               </button>
               <input
                 className="input"

@@ -7,9 +7,24 @@ const SORT_FIELD_KEYS = {
   created: 'created_at',
   updated: 'updated_at',
   followup: 'followup_date',
-  appointment: 'appointment_date',
-  last_contacted: 'last_contacted_at'
+  appointment: 'appointment_date'
 };
+
+/**
+ * Sort choices depend on the stage. Every stage sorts by Created / Updated; the
+ * follow-up stage also sorts by its follow-up date, the appointment stage by its
+ * appointment date. No other sort fields.
+ */
+const BASE_SORT_OPTIONS = [
+  { value: 'created', label: 'Created' },
+  { value: 'updated', label: 'Updated' }
+];
+function sortOptionsFor(stage) {
+  const opts = [...BASE_SORT_OPTIONS];
+  if (stage.requires_followup_date) opts.push({ value: 'followup', label: 'Follow-up date' });
+  if (stage.requires_appointment_date) opts.push({ value: 'appointment', label: 'Appointment date' });
+  return opts;
+}
 
 /** The Kanban layout. `leads` arrives already filtered by the container. */
 export default function LeadBoard({ stages, leads, onOpenLead, onReload, setError }) {
@@ -22,6 +37,11 @@ export default function LeadBoard({ stages, leads, onOpenLead, onReload, setErro
   function getSort(stageId) {
     return sortState[stageId] || DEFAULT_SORT;
   }
+  /** getSort clamped to a field this stage actually offers. */
+  function resolvedSort(stage) {
+    const cur = getSort(stage.id);
+    return sortOptionsFor(stage).some((o) => o.value === cur.field) ? cur : { ...cur, field: 'created' };
+  }
   function setSortField(stageId, field) {
     setSortState((s) => ({ ...s, [stageId]: { ...getSort(stageId), field } }));
   }
@@ -31,23 +51,19 @@ export default function LeadBoard({ stages, leads, onOpenLead, onReload, setErro
       return { ...s, [stageId]: { ...cur, dir: cur.dir === 'asc' ? 'desc' : 'asc' } };
     });
   }
-  function sortLeads(list, stageId) {
-    const { field, dir } = getSort(stageId);
+  function sortLeads(list, stage) {
+    const { field, dir } = resolvedSort(stage);
     const mul = dir === 'desc' ? -1 : 1;
+    const key = SORT_FIELD_KEYS[field] || 'created_at';
     const sorted = [...list];
-    if (field === 'name') {
-      sorted.sort((a, b) => mul * (a.full_name || '').localeCompare(b.full_name || ''));
-    } else {
-      const key = SORT_FIELD_KEYS[field] || 'created_at';
-      sorted.sort((a, b) => {
-        const av = a[key] ? new Date(a[key]).getTime() : null;
-        const bv = b[key] ? new Date(b[key]).getTime() : null;
-        if (av === null && bv === null) return 0;
-        if (av === null) return 1;
-        if (bv === null) return -1;
-        return mul * (av - bv);
-      });
-    }
+    sorted.sort((a, b) => {
+      const av = a[key] ? new Date(a[key]).getTime() : null;
+      const bv = b[key] ? new Date(b[key]).getTime() : null;
+      if (av === null && bv === null) return 0;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      return mul * (av - bv);
+    });
     return sorted;
   }
 
@@ -108,9 +124,9 @@ export default function LeadBoard({ stages, leads, onOpenLead, onReload, setErro
       <div className="board">
         {stages.map((stage) => {
           const stageLeads = leads.filter((l) => l.stage_id === stage.id);
-          const items = sortLeads(stageLeads, stage.id);
+          const items = sortLeads(stageLeads, stage);
           const value = stageLeads.reduce((a, l) => a + Number(l.value || 0), 0);
-          const sort = getSort(stage.id);
+          const sort = resolvedSort(stage);
           return (
             <section
               key={stage.id}
@@ -130,12 +146,9 @@ export default function LeadBoard({ stages, leads, onOpenLead, onReload, setErro
 
               <div className="col-sort">
                 <select className="select" value={sort.field} onChange={(e) => setSortField(stage.id, e.target.value)}>
-                  <option value="name">Name</option>
-                  <option value="created">Created</option>
-                  <option value="updated">Updated</option>
-                  <option value="last_contacted">Last contacted</option>
-                  <option value="followup">Followup</option>
-                  <option value="appointment">Appointment</option>
+                  {sortOptionsFor(stage).map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
                 </select>
                 <button
                   className="dir-btn"

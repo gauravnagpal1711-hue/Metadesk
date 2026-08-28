@@ -1,6 +1,7 @@
 import express from 'express';
 import { q } from '../db.js';
 import { generateImage, generateCopy, imageProvider, copyProvider } from '../services/ai.js';
+import { syncBriefForCreative } from './campaignBriefs.js';
 
 export const creativesRouter = express.Router();
 
@@ -63,7 +64,10 @@ creativesRouter.post('/upload', async (req, res, next) => {
 
 creativesRouter.patch('/:id', async (req, res, next) => {
   try {
-    const { status, headline, primary_text, cta, label, cta_type, destination_type, destination_value, link_url } = req.body || {};
+    const {
+      status, headline, primary_text, cta, label, cta_type,
+      destination_type, destination_value, link_url, campaign_defaults
+    } = req.body || {};
     const { rows } = await q(
       `UPDATE creatives SET
          status = COALESCE($2, status),
@@ -74,12 +78,19 @@ creativesRouter.patch('/:id', async (req, res, next) => {
          cta_type = COALESCE($7, cta_type),
          destination_type = COALESCE($8, destination_type),
          destination_value = COALESCE($9, destination_value),
-         link_url = COALESCE($10, link_url)
+         link_url = COALESCE($10, link_url),
+         campaign_defaults = COALESCE($11::jsonb, campaign_defaults)
        WHERE id = $1 RETURNING *`,
-      [req.params.id, status, headline, primary_text, cta, label, cta_type, destination_type, destination_value, link_url]
+      [
+        req.params.id, status, headline, primary_text, cta, label, cta_type,
+        destination_type, destination_value, link_url,
+        campaign_defaults !== undefined ? JSON.stringify(campaign_defaults) : null
+      ]
     );
     if (!rows.length) return res.status(404).json({ error: 'That creative no longer exists.' });
-    res.json(rows[0]);
+    // Keep this creative's campaign brief in step (created / updated / left alone).
+    const brief = await syncBriefForCreative(rows[0].id).catch(() => null);
+    res.json({ ...rows[0], brief });
   } catch (e) {
     next(e);
   }
