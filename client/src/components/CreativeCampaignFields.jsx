@@ -21,6 +21,7 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
   const [waNumber, setWaNumber] = useState(null);
   const [waManual, setWaManual] = useState('');
   const [forms, setForms] = useState([]);
+  const [newForm, setNewForm] = useState(null); // null = closed; object = builder open
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -39,6 +40,38 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
   }
 
   const effectiveWa = (waManual || waNumber || '').replace(/\D/g, '');
+
+  const BLANK_FORM = {
+    name: label.trim() ? `${label.trim()} form` : 'New form',
+    greeting: 'Get in touch',
+    subtext: 'Leave your details and we will contact you shortly.',
+    fields: ['name', 'phone'],
+    thank_you_title: 'Thank you!',
+    thank_you_body: 'We will be in touch soon.',
+    privacy_url: ''
+  };
+  function toggleFormField(f) {
+    setNewForm((s) => {
+      if (f === 'phone') return s; // phone is always collected
+      const has = s.fields.includes(f);
+      return { ...s, fields: has ? s.fields.filter((x) => x !== f) : [...s.fields, f] };
+    });
+  }
+  async function createForm() {
+    if (!newForm.name.trim()) { setError('Name the form.'); return; }
+    setBusy(true);
+    setError('');
+    try {
+      const created = await api.post('/meta/lead-forms', newForm);
+      setForms((fs) => [{ id: created.id, name: created.name, fields: newForm.fields }, ...fs]);
+      setDestValue(created.id);
+      setNewForm(null);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function save() {
     setBusy(true);
@@ -102,20 +135,64 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
         </div>
       )}
 
-      {destType === 'lead_form' && (
-        forms.length > 0 ? (
-          <div className="field" style={{ margin: 0 }}>
-            <label>Which form?</label>
-            <select className="select" value={destValue} onChange={(e) => setDestValue(e.target.value)}>
-              <option value="">Choose a form…</option>
+      {destType === 'lead_form' && !newForm && (
+        <div className="field" style={{ margin: 0 }}>
+          <label>Which form?</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <select className="select" value={destValue} onChange={(e) => setDestValue(e.target.value)} style={{ flex: 1 }}>
+              <option value="">{forms.length ? 'Choose a form…' : 'No forms yet'}</option>
               {forms.map((f) => <option key={f.id} value={f.id}>{f.name}{f.fields?.length ? ` (${f.fields.join(', ').toLowerCase()})` : ''}</option>)}
             </select>
+            <button className="btn sm" onClick={() => setNewForm(BLANK_FORM)}>+ New form</button>
           </div>
-        ) : (
-          <div className="notice" style={{ margin: 0 }}>
-            No instant forms on your Page yet. Use <strong>Message you on WhatsApp</strong> for now — it needs no form.
+        </div>
+      )}
+
+      {destType === 'lead_form' && newForm && (
+        <div style={{ display: 'grid', gap: 8, padding: '10px', border: '1px solid var(--line)', borderRadius: 8 }}>
+          <div className="mono-label">New instant form</div>
+          <div className="field" style={{ margin: 0 }}>
+            <label>Form name (only you see this)</label>
+            <input className="input" value={newForm.name} onChange={(e) => setNewForm((s) => ({ ...s, name: e.target.value }))} />
           </div>
-        )
+          <div className="field" style={{ margin: 0 }}>
+            <label>Greeting headline</label>
+            <input className="input" value={newForm.greeting} onChange={(e) => setNewForm((s) => ({ ...s, greeting: e.target.value }))} />
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label>Short line under the greeting</label>
+            <input className="input" value={newForm.subtext} onChange={(e) => setNewForm((s) => ({ ...s, subtext: e.target.value }))} />
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label>Collect</label>
+            <div style={{ display: 'flex', gap: 12, fontSize: 13, flexWrap: 'wrap' }}>
+              {[['name', 'Name'], ['phone', 'Phone'], ['email', 'Email'], ['city', 'City']].map(([f, l]) => (
+                <label key={f} style={{ display: 'flex', gap: 5, alignItems: 'center', cursor: f === 'phone' ? 'default' : 'pointer' }}>
+                  <input type="checkbox" checked={f === 'phone' || newForm.fields.includes(f)} disabled={f === 'phone'} onChange={() => toggleFormField(f)} />
+                  {l}{f === 'phone' ? ' (always)' : ''}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div className="field" style={{ margin: 0 }}>
+              <label>Thank-you title</label>
+              <input className="input" value={newForm.thank_you_title} onChange={(e) => setNewForm((s) => ({ ...s, thank_you_title: e.target.value }))} />
+            </div>
+            <div className="field" style={{ margin: 0 }}>
+              <label>Thank-you text</label>
+              <input className="input" value={newForm.thank_you_body} onChange={(e) => setNewForm((s) => ({ ...s, thank_you_body: e.target.value }))} />
+            </div>
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label>Privacy policy link (required by Meta)</label>
+            <input className="input" placeholder="https://your-site.com/privacy — or leave blank" value={newForm.privacy_url} onChange={(e) => setNewForm((s) => ({ ...s, privacy_url: e.target.value }))} />
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn primary sm" onClick={createForm} disabled={busy}>{busy ? 'Creating…' : 'Create form'}</button>
+            <button className="btn ghost sm" onClick={() => setNewForm(null)}>Cancel</button>
+          </div>
+        </div>
       )}
 
       {destType === 'website' && (

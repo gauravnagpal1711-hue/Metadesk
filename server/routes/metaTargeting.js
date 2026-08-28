@@ -5,15 +5,17 @@ import {
   resolveWhatsappNumber,
   getPageInfo,
   listLeadForms,
+  createLeadForm,
   metaConfigured
 } from '../services/meta.js';
 
 export const metaTargetingRouter = express.Router();
 
 /**
- * Read-only lookups that let the in-app campaign builder ask for cities /
- * interests / an existing form in plain language instead of raw Meta IDs.
- * Nothing here writes to Meta — Claude Code's MCP connector does all creation.
+ * Lookups that let the in-app campaign builder ask for cities / interests /
+ * forms in plain language instead of raw Meta IDs. Everything here is a
+ * read except POST /lead-forms, which creates an Instant Form on the Page
+ * (the one Meta write the app makes — the MCP connector has no such tool).
  */
 
 metaTargetingRouter.get('/geo', async (req, res, next) => {
@@ -52,6 +54,14 @@ metaTargetingRouter.get('/lead-forms', async (req, res, next) => {
   try {
     if (!metaConfigured()) return res.json([]);
     res.json(await listLeadForms());
+  } catch (e) {
+    next(e);
+  }
+});
+
+metaTargetingRouter.post('/lead-forms', async (req, res, next) => {
+  try {
+    res.json(await createLeadForm(req.body || {}));
   } catch (e) {
     next(e);
   }

@@ -238,6 +238,47 @@ export async function getPageInfo() {
   }
 }
 
+const QUESTION_TYPE = { name: 'FULL_NAME', phone: 'PHONE', email: 'EMAIL', city: 'CITY' };
+
+/**
+ * Create an Instant Form on the connected Page. This is the ONE Graph *write*
+ * the app makes — Meta's Ads MCP connector has no lead-form tool, and a
+ * shopkeeper should not have to open Ads Manager. The form costs nothing, is
+ * deletable, and the page token already carries pages_manage_ads. Spec fields
+ * come straight from the plain-language mini-builder.
+ */
+export async function createLeadForm(spec = {}) {
+  const pageId = connection.pageId;
+  if (!pageId) throw new Error('Connect a Facebook page first (Facebook tab).');
+  if (!connection.pageToken) throw new Error('Missing page access token — re-pick your page on the Facebook tab.');
+
+  const wanted = Array.isArray(spec.fields) && spec.fields.length ? spec.fields : ['name', 'phone'];
+  const questions = [...new Set(wanted)].map((f) => ({ type: QUESTION_TYPE[f] || 'FULL_NAME' }));
+  if (!questions.some((q) => q.type === 'PHONE')) questions.push({ type: 'PHONE' });
+
+  const privacyUrl = (spec.privacy_url || '').trim() || 'https://www.facebook.com/privacy/policy/';
+  const body = {
+    name: (spec.name || 'Ads Desk form').slice(0, 250),
+    locale: 'EN_US',
+    questions,
+    privacy_policy: { url: privacyUrl, link_text: 'Privacy policy' },
+    context_card: {
+      title: (spec.greeting || 'Get in touch').slice(0, 60),
+      style: 'PARAGRAPH_STYLE',
+      content: [(spec.subtext || 'Leave your details and we will contact you shortly.').slice(0, 200)]
+    },
+    thank_you_page: {
+      title: (spec.thank_you_title || 'Thank you!').slice(0, 60),
+      body: (spec.thank_you_body || 'We will be in touch soon.').slice(0, 200),
+      button_type: 'VIEW_WEBSITE',
+      website_url: privacyUrl
+    }
+  };
+
+  const res = await graph(`${pageId}/leadgen_forms`, { method: 'POST', body, token: connection.pageToken });
+  return { id: res.id, name: body.name };
+}
+
 /** Raw leads for one form, newest first. */
 export async function fetchFormLeads(formId, since) {
   const params = { fields: 'id,created_time,field_data,campaign_id,campaign_name,form_id', limit: 200 };

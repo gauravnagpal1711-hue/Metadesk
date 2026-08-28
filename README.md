@@ -114,13 +114,17 @@ Everything the shopkeeper sees is one short question per step; Meta's real knobs
    follow-up questions because the brief already carries resolved geo keys, the
    WhatsApp number / form id, and any interest IDs.
 
-**Read-only Meta lookups** (`server/routes/metaTargeting.js`): `GET /api/meta/geo`,
-`/interests`, `/whatsapp-number`, `/page`, `/lead-forms`.
+**Meta lookups** (`server/routes/metaTargeting.js`): `GET /api/meta/geo`,
+`/interests`, `/whatsapp-number`, `/page`, `/lead-forms` — all reads. The single
+exception is `POST /api/meta/lead-forms`.
 
-**Instant Forms:** creating a new lead form has no Meta Ads MCP tool and the app
-does no Meta writes, so the form picker only lists forms that already exist on the
-Page. If there are none, use a WhatsApp creative (needs no form) or create one
-form once in Meta.
+**Instant Forms:** the Meta Ads MCP connector has no lead-form tool, so the app
+creates them itself with the one Graph write it makes — `POST /{page_id}/leadgen_forms`
+via `createLeadForm()` in `server/services/meta.js`. In *Set up for campaign* →
+*Fill a quick form* → *+ New form*, the shopkeeper fills a plain mini-builder
+(name, greeting, which fields to collect, thank-you text, privacy URL); the form
+is created on the Page instantly (no spend, deletable) and auto-selected. The
+picker also lists any forms that already exist.
 
 **What Claude Code does** (no code in this repo — MCP tools run in the session):
 
