@@ -17,7 +17,8 @@ import { whatsappRouter } from './routes/whatsapp.js';
 import { reachUsRouter } from './routes/reachUs.js';
 import { facebookRouter } from './routes/facebook.js';
 import { loadConnection, connConfigured, listCampaigns, listLeadForms, fetchFormLeads, flattenLead, normalisePhone } from './services/meta.js';
-import { startWeb } from './services/whatsappWeb.js';
+import { startAllWebSessions } from './services/whatsappWeb.js';
+import { pairedWebUserIds } from './services/waConnection.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -180,8 +181,10 @@ if (process.env.ADS_DESK_NO_BOOT !== '1') initDb()
     syncEverything();
     setInterval(syncEverything, SYNC_MINUTES * 60 * 1000);
 
-    if (process.env.WA_WEB_AUTOSTART === 'true') {
-      startWeb().catch((e) => console.error('WhatsApp Web autostart failed:', e.message));
+    if (process.env.WA_WEB_AUTOSTART !== 'false') {
+      pairedWebUserIds()
+        .then((ids) => startAllWebSessions(ids))
+        .catch((e) => console.error('WhatsApp Web autostart failed:', e.message));
     }
   })
   .catch((err) => {

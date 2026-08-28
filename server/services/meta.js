@@ -327,7 +327,7 @@ export async function resolveWhatsappNumber(userId) {
   }
   try {
     const { webStatus } = await import('./whatsappWeb.js');
-    const me = webStatus()?.me;
+    const me = webStatus(userId)?.me;
     if (me) return { number: String(me).replace(/\D/g, ''), source: 'whatsapp-web', manual: false };
   } catch {
     /* Baileys not running */

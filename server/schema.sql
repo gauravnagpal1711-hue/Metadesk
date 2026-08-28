@@ -267,3 +267,17 @@ expires_at TIMESTAMPTZ,
 connected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Per-tenant WhatsApp. Cloud API creds live here; the Baileys (WhatsApp Web)
+-- session files live on disk at <WA_SESSION_DIR>/<user_id>/ and this row just
+-- tracks whether that user has a paired session to auto-start on boot.
+CREATE TABLE IF NOT EXISTS wa_connections (
+user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+cloud_phone_number_id TEXT,
+cloud_token TEXT,
+cloud_verify_token TEXT,
+web_paired BOOLEAN NOT NULL DEFAULT false,
+web_phone TEXT,
+updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS wa_connections_phone_number_id_idx ON wa_connections(cloud_phone_number_id);

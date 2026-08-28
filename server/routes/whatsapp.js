@@ -1,8 +1,11 @@
 import express from 'express';
 import { q, getSetting, setSetting } from '../db.js';
-import { cloudConfigured, parseWebhook, downloadCloudMedia } from '../services/whatsappCloud.js';
+import { parseWebhook, downloadCloudMedia } from '../services/whatsappCloud.js';
 import { startWeb, logoutWeb, webStatus, onWebMessage, onHistorySync } from '../services/whatsappWeb.js';
 import { normalisePhone } from '../services/meta.js';
+import {
+  loadWaConnection, saveWaConnection, userIdForPhoneNumberId, verifyTokenMatches
+} from '../services/waConnection.js';
 
 export const whatsappRouter = express.Router();
 
@@ -13,25 +16,12 @@ const DEFAULT_AD_GREETING_PATTERNS = [
   'Hello! Can I get more info on this?'
 ];
 
-// Inbound WhatsApp (Baileys listener / Cloud webhook) has no logged-in user.
-// Today there is one global WhatsApp connection, so it belongs to the first
-// user. Stage 4 replaces this with per-session tenant routing.
-let _ownerId = null;
-async function ownerUserId() {
-  if (_ownerId) return _ownerId;
-  const { rows } = await q('SELECT id FROM users ORDER BY id LIMIT 1');
-  _ownerId = rows[0]?.id || null;
-  return _ownerId;
-}
-
-/** True if the message text looks like a Meta ad-click greeting, not an ordinary reply. */
 function looksLikeAdGreeting(body, patterns) {
   if (!body) return false;
   const text = body.toLowerCase();
   return patterns.some((p) => p && text.includes(String(p).toLowerCase()));
 }
 
-/** True if this wa_message_id is already stored for this user. */
 async function alreadyStored(userId, wa_message_id) {
   if (!wa_message_id) return false;
   const { rows } = await q('SELECT 1 FROM messages WHERE wa_message_id = $1 AND user_id = $2 LIMIT 1', [wa_message_id, userId]);
@@ -39,12 +29,11 @@ async function alreadyStored(userId, wa_message_id) {
 }
 
 /**
- * Attach an incoming message to a lead, creating a PENDING lead if this number
- * is new. Only stores messages for Meta-verified leads. Shared by the Cloud API
- * webhook and the WhatsApp Web listener.
+ * Attach an incoming message to one user's lead, creating a PENDING lead if the
+ * number is new. Only stores messages for Meta-verified leads. Shared by the
+ * Cloud API webhook (routed by phone_number_id) and each user's Baileys socket.
  */
-export async function ingestIncoming({ from, name, body, wa_message_id, ts, fromMe, media_data, media_mime }) {
-  const userId = await ownerUserId();
+export async function ingestIncoming(userId, { from, name, body, wa_message_id, ts, fromMe, media_data, media_mime }) {
   if (!userId) return null;
   const phone = normalisePhone(from);
   const { rows } = await q('SELECT * FROM leads WHERE phone = $1 AND user_id = $2 ORDER BY created_at ASC LIMIT 1', [phone, userId]);
@@ -59,21 +48,19 @@ export async function ingestIncoming({ from, name, body, wa_message_id, ts, from
       [lead.id, body, wa_message_id, media_data || null, media_mime || null, ts || new Date(), userId]
     );
     await q('UPDATE leads SET last_contacted_at = now(), updated_at = now() WHERE id = $1', [lead.id]);
-    console.log(`[WhatsApp] Recorded phone-sent reply for lead ${lead.id} (${phone})`);
+    console.log(`[WhatsApp u${userId}] Recorded phone-sent reply for lead ${lead.id}`);
     return lead;
   }
 
   if (!lead) {
     const onlyExistingLeads = await getSetting(userId, 'wa_only_existing_leads', false);
     const patterns = await getSetting(userId, 'wa_ad_greeting_patterns', DEFAULT_AD_GREETING_PATTERNS);
-    const isAdGreeting = looksLikeAdGreeting(body, patterns);
-
-    if (onlyExistingLeads || !isAdGreeting) {
+    if (onlyExistingLeads || !looksLikeAdGreeting(body, patterns)) {
       await q(
         `INSERT INTO pending_messages (phone, body, channel, created_at, user_id) VALUES ($1, $2, 'whatsapp', $3, $4)`,
         [phone, body, ts || new Date(), userId]
       );
-      console.log(`[WhatsApp] Message from unknown number ${phone} queued`);
+      console.log(`[WhatsApp u${userId}] Message from unknown number ${phone} queued`);
       return null;
     }
     const { rows: firstStage } = await q('SELECT id FROM stages WHERE user_id = $1 ORDER BY position LIMIT 1', [userId]);
@@ -83,7 +70,7 @@ export async function ingestIncoming({ from, name, body, wa_message_id, ts, from
       [name || phone, phone, firstStage[0]?.id, userId]
     );
     lead = inserted.rows[0];
-    console.log(`[WhatsApp] Created verified lead for phone ${phone} from ad conversation`);
+    console.log(`[WhatsApp u${userId}] Created verified lead for ${phone} from ad conversation`);
   }
 
   if (lead.is_meta_verified) {
@@ -94,7 +81,7 @@ export async function ingestIncoming({ from, name, body, wa_message_id, ts, from
       [lead.id, body, wa_message_id, media_data || null, media_mime || null, ts || new Date(), userId]
     );
     await q('UPDATE leads SET wants_whatsapp = true, updated_at = now() WHERE id = $1', [lead.id]);
-    console.log(`[WhatsApp] Message attached to verified lead ${lead.id}`);
+    console.log(`[WhatsApp u${userId}] Message attached to lead ${lead.id}`);
     return lead;
   }
 
@@ -102,13 +89,11 @@ export async function ingestIncoming({ from, name, body, wa_message_id, ts, from
     `INSERT INTO pending_messages (phone, body, channel, created_at, user_id) VALUES ($1, $2, 'whatsapp', $3, $4)`,
     [phone, body, ts || new Date(), userId]
   );
-  console.log(`[WhatsApp] Message queued in pending_messages for phone ${phone}`);
+  console.log(`[WhatsApp u${userId}] Message queued in pending_messages for ${phone}`);
   return lead || null;
 }
 
-/** Backfills conversation history delivered right after a fresh WhatsApp Web pairing. */
-async function ingestHistoryBatch(items) {
-  const userId = await ownerUserId();
+async function ingestHistoryBatch(userId, items) {
   if (!userId) return;
   let attached = 0;
   for (const item of items) {
@@ -128,21 +113,62 @@ async function ingestHistoryBatch(items) {
       console.error('History backfill failed for one message:', e.message);
     }
   }
-  if (attached > 0) console.log(`[WhatsApp] History sync: attached ${attached} message(s) to existing leads`);
+  if (attached > 0) console.log(`[WhatsApp u${userId}] History sync: attached ${attached} message(s)`);
 }
 
 onWebMessage(ingestIncoming);
 onHistorySync(ingestHistoryBatch);
 
-whatsappRouter.get('/status', (req, res) => {
-  res.json({
-    cloud: {
-      connected: cloudConfigured(),
-      phoneNumberId: process.env.WA_PHONE_NUMBER_ID || null,
-      webhookPath: '/api/whatsapp/webhook'
-    },
-    web: webStatus()
-  });
+/* ---------- per-user status + config ---------- */
+
+whatsappRouter.get('/status', async (req, res, next) => {
+  try {
+    const wa = await loadWaConnection(req.user.id);
+    const web = webStatus(req.user.id);
+    // Lazily persist a completed pairing so it auto-starts after the next deploy.
+    if (web.status === 'connected' && (!wa.webPaired || wa.webPhone !== web.me)) {
+      await saveWaConnection(req.user.id, { webPaired: true, webPhone: web.me });
+    }
+    res.json({
+      cloud: {
+        connected: Boolean(wa.cloud),
+        phoneNumberId: wa.cloudPhoneNumberId,
+        webhookPath: '/api/whatsapp/webhook'
+      },
+      web
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Cloud API credentials for this tenant. */
+whatsappRouter.get('/cloud', async (req, res, next) => {
+  try {
+    const wa = await loadWaConnection(req.user.id);
+    res.json({
+      phoneNumberId: wa.cloudPhoneNumberId,
+      verifyToken: wa.cloudVerifyToken,
+      hasToken: Boolean(wa.cloud?.token),
+      webhookUrl: '/api/whatsapp/webhook'
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+whatsappRouter.patch('/cloud', async (req, res, next) => {
+  try {
+    const { phoneNumberId, token, verifyToken } = req.body || {};
+    const patch = {};
+    if (phoneNumberId !== undefined) patch.cloudPhoneNumberId = String(phoneNumberId).trim() || null;
+    if (token !== undefined) patch.cloudToken = String(token).trim() || null;
+    if (verifyToken !== undefined) patch.cloudVerifyToken = String(verifyToken).trim() || null;
+    const wa = await saveWaConnection(req.user.id, patch);
+    res.json({ phoneNumberId: wa.cloudPhoneNumberId, verifyToken: wa.cloudVerifyToken, hasToken: Boolean(wa.cloud?.token) });
+  } catch (e) {
+    next(e);
+  }
 });
 
 whatsappRouter.get('/settings', async (req, res, next) => {
@@ -172,11 +198,7 @@ whatsappRouter.patch('/settings', async (req, res, next) => {
   }
 });
 
-/* ---------- quick-reply message templates ----------
- * Saved WhatsApp replies, one list per user. Stored as a settings blob
- * [{ id, label, body }]; bodies may contain {name} / {first_name} / {phone} /
- * {city} placeholders, filled in by the client on insert.
- */
+/* ---------- quick-reply message templates (one list per user) ---------- */
 
 function cleanTemplate(t) {
   return {
@@ -238,10 +260,11 @@ whatsappRouter.delete('/templates/:id', async (req, res, next) => {
   }
 });
 
-/** Start pairing — poll /status until it flips to connected. */
+/* ---------- Baileys (WhatsApp Web) pairing, per user ---------- */
+
 whatsappRouter.post('/web/connect', async (req, res, next) => {
   try {
-    res.json(await startWeb());
+    res.json(await startWeb(req.user.id));
   } catch (e) {
     next(e);
   }
@@ -249,18 +272,20 @@ whatsappRouter.post('/web/connect', async (req, res, next) => {
 
 whatsappRouter.post('/web/logout', async (req, res, next) => {
   try {
-    res.json(await logoutWeb());
+    const out = await logoutWeb(req.user.id);
+    await saveWaConnection(req.user.id, { webPaired: false, webPhone: null });
+    res.json(out);
   } catch (e) {
     next(e);
   }
 });
 
-/* ---------- Meta Cloud API webhook ---------- */
+/* ---------- Meta Cloud API webhook (unauthenticated, routed by tenant) ---------- */
 
-whatsappRouter.get('/webhook', (req, res) => {
+whatsappRouter.get('/webhook', async (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
-  if (mode === 'subscribe' && token === process.env.WA_VERIFY_TOKEN) {
+  if (mode === 'subscribe' && (await verifyTokenMatches(token))) {
     return res.status(200).send(req.query['hub.challenge']);
   }
   res.sendStatus(403);
@@ -270,15 +295,23 @@ whatsappRouter.post('/webhook', async (req, res) => {
   res.sendStatus(200); // acknowledge fast, then process
   try {
     for (const msg of parseWebhook(req.body)) {
+      const userId = await userIdForPhoneNumberId(msg.phone_number_id);
+      if (!userId) {
+        console.warn('[WhatsApp webhook] no tenant for phone_number_id', msg.phone_number_id);
+        continue;
+      }
       if (msg.media?.id) {
         try {
-          const downloaded = await downloadCloudMedia(msg.media.id);
-          if (downloaded) Object.assign(msg, downloaded);
+          const wa = await loadWaConnection(userId);
+          if (wa.cloud) {
+            const downloaded = await downloadCloudMedia(wa.cloud, msg.media.id);
+            if (downloaded) Object.assign(msg, downloaded);
+          }
         } catch (e) {
           console.error('WhatsApp Cloud media download failed:', e.message);
         }
       }
-      await ingestIncoming(msg);
+      await ingestIncoming(userId, msg);
     }
   } catch (e) {
     console.error('Webhook processing failed:', e.message);

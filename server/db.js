@@ -51,6 +51,28 @@ export async function seedStagesForUser(userId) {
   console.log(`Seeded funnel stages for user ${userId}.`);
 }
 
+/** Move a pre-existing global Baileys session (<WA_SESSION_DIR>/creds.json etc.)
+ *  into <WA_SESSION_DIR>/<firstUserId>/. Returns true if it moved something. */
+function migrateWaSession(firstUserId) {
+  const root = process.env.WA_SESSION_DIR || '/data/wa-session';
+  try {
+    if (!fs.existsSync(path.join(root, 'creds.json'))) return false;
+    const dest = path.join(root, String(firstUserId));
+    if (fs.existsSync(path.join(dest, 'creds.json'))) return false; // already migrated
+    fs.mkdirSync(dest, { recursive: true });
+    for (const entry of fs.readdirSync(root)) {
+      const full = path.join(root, entry);
+      if (fs.statSync(full).isDirectory()) continue; // leave per-user subdirs alone
+      fs.renameSync(full, path.join(dest, entry));
+    }
+    console.log(`Moved global WhatsApp session into ${dest}`);
+    return true;
+  } catch (e) {
+    console.error('WhatsApp session migration failed:', e.message);
+    return false;
+  }
+}
+
 async function settingsPkHasUserId() {
   const { rows } = await q(`
     SELECT a.attname
@@ -111,6 +133,23 @@ export async function initDb() {
     if (legacyConns.length) {
       await q(`DELETE FROM settings WHERE key = 'meta_connection'`);
       console.log(`Migrated ${legacyConns.length} Meta connection(s) into meta_connections.`);
+    }
+
+    // Stage 4: seed the first user's WhatsApp Cloud config from legacy env vars,
+    // and move the single global Baileys session into their per-user dir.
+    if (process.env.WA_PHONE_NUMBER_ID && process.env.WA_TOKEN) {
+      await q(
+        `INSERT INTO wa_connections (user_id, cloud_phone_number_id, cloud_token, cloud_verify_token)
+         VALUES ($1,$2,$3,$4) ON CONFLICT (user_id) DO NOTHING`,
+        [firstUserId, process.env.WA_PHONE_NUMBER_ID, process.env.WA_TOKEN, process.env.WA_VERIFY_TOKEN || null]
+      );
+    }
+    if (migrateWaSession(firstUserId)) {
+      await q(
+        `INSERT INTO wa_connections (user_id, web_paired) VALUES ($1, true)
+         ON CONFLICT (user_id) DO UPDATE SET web_paired = true`,
+        [firstUserId]
+      );
     }
 
     await seedStagesForUser(firstUserId);

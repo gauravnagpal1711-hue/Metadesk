@@ -228,6 +228,28 @@ console.log('\nMeta connection isolation');
   expect(!JSON.stringify(sa.json).includes('A-secret-token'), 'A facebook/status does not leak the access token');
 }
 
+// ---- WhatsApp connection isolation ---------------------------------
+console.log('\nWhatsApp connection isolation');
+{
+  await call(A, 'PATCH', '/api/whatsapp/cloud', { phoneNumberId: 'PN_A_123', token: 'wa-secret-A', verifyToken: 'verifyA' });
+  const ca = await call(A, 'GET', '/api/whatsapp/cloud');
+  const cb = await call(B, 'GET', '/api/whatsapp/cloud');
+  expect(ca.json.phoneNumberId === 'PN_A_123' && ca.json.hasToken === true, 'A whatsapp/cloud shows A config');
+  expect(!cb.json.phoneNumberId && !cb.json.hasToken, 'B whatsapp/cloud shows nothing', JSON.stringify(cb.json));
+  expect(!JSON.stringify(ca.json).includes('wa-secret-A'), 'A whatsapp/cloud does not leak the token');
+  const sa = await call(A, 'GET', '/api/whatsapp/status');
+  const sb = await call(B, 'GET', '/api/whatsapp/status');
+  expect(sa.json.cloud.connected === true && sa.json.cloud.phoneNumberId === 'PN_A_123', 'A whatsapp/status cloud is A\'s');
+  expect(sb.json.cloud.connected === false && !sb.json.cloud.phoneNumberId, 'B whatsapp/status cloud not connected');
+  // webhook routing: A's phone_number_id resolves to A, an unknown one to nobody
+  const { userIdForPhoneNumberId, verifyTokenMatches } = await import('../server/services/waConnection.js');
+  const { rows: ua } = await q('SELECT id FROM users WHERE username = $1', ['isoA']);
+  expect((await userIdForPhoneNumberId('PN_A_123')) === ua[0].id, 'webhook routes PN_A_123 -> user A');
+  expect((await userIdForPhoneNumberId('PN_UNKNOWN')) === null, 'webhook routes unknown phone_number_id -> nobody');
+  expect((await verifyTokenMatches('verifyA')) === true, 'verify token A matches');
+  expect((await verifyTokenMatches('nope')) === false, 'bogus verify token rejected');
+}
+
 // ---- sanity: A still sees its own stuff -------------------------------
 console.log('\nself-access sanity');
 expect(await listContains(A, '/api/creatives', (r) => r.id === a.creativeId), 'A sees own creative');

@@ -1,22 +1,26 @@
 /**
- * Official WhatsApp Cloud API. Best for reliable, always-on messaging.
- * Needs WA_PHONE_NUMBER_ID, WA_TOKEN and WA_VERIFY_TOKEN.
+ * Official WhatsApp Cloud API, per tenant.
+ *
+ * Every call takes a `cfg` object: { phoneNumberId, token }. cfgFromEnv() keeps
+ * the old WA_PHONE_NUMBER_ID / WA_TOKEN env vars working for the first user.
  */
 const VERSION = process.env.META_API_VERSION || 'v21.0';
 const MAX_MEDIA_BYTES = 15 * 1024 * 1024; // keep base64 rows in Postgres reasonable
 
-export function cloudConfigured() {
-  return Boolean(process.env.WA_PHONE_NUMBER_ID && process.env.WA_TOKEN);
+export function cfgFromEnv() {
+  if (!process.env.WA_PHONE_NUMBER_ID || !process.env.WA_TOKEN) return null;
+  return { phoneNumberId: process.env.WA_PHONE_NUMBER_ID, token: process.env.WA_TOKEN };
 }
 
-export async function sendText(to, body) {
-  if (!cloudConfigured()) throw new Error('WhatsApp Cloud API is not connected.');
-  const res = await fetch(`https://graph.facebook.com/${VERSION}/${process.env.WA_PHONE_NUMBER_ID}/messages`, {
+export function cloudConfigured(cfg) {
+  return Boolean(cfg && cfg.phoneNumberId && cfg.token);
+}
+
+export async function sendText(cfg, to, body) {
+  if (!cloudConfigured(cfg)) throw new Error('WhatsApp Cloud API is not connected.');
+  const res = await fetch(`https://graph.facebook.com/${VERSION}/${cfg.phoneNumberId}/messages`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.WA_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
+    headers: { Authorization: `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       messaging_product: 'whatsapp',
       to,
@@ -37,8 +41,8 @@ const KIND_BY_MIME = (mime) => {
 };
 
 /** mediaData is a base64 data URL. Uploads to Meta first, then sends by the returned media id. */
-export async function sendMedia(to, { mediaData, mimeType, caption, fileName }) {
-  if (!cloudConfigured()) throw new Error('WhatsApp Cloud API is not connected.');
+export async function sendMedia(cfg, to, { mediaData, mimeType, caption, fileName }) {
+  if (!cloudConfigured(cfg)) throw new Error('WhatsApp Cloud API is not connected.');
   const match = /^data:([^;]+);base64,(.*)$/.exec(mediaData || '');
   if (!match) throw new Error('mediaData must be a base64 data URL.');
   const mimetype = mimeType || match[1];
@@ -50,9 +54,9 @@ export async function sendMedia(to, { mediaData, mimeType, caption, fileName }) 
   form.append('type', mimetype);
   form.append('file', new Blob([buffer], { type: mimetype }), fileName || `upload.${mimetype.split('/')[1] || 'bin'}`);
 
-  const uploadRes = await fetch(`https://graph.facebook.com/${VERSION}/${process.env.WA_PHONE_NUMBER_ID}/media`, {
+  const uploadRes = await fetch(`https://graph.facebook.com/${VERSION}/${cfg.phoneNumberId}/media`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.WA_TOKEN}` },
+    headers: { Authorization: `Bearer ${cfg.token}` },
     body: form
   });
   const uploadJson = await uploadRes.json();
@@ -64,9 +68,9 @@ export async function sendMedia(to, { mediaData, mimeType, caption, fileName }) 
     type: kind,
     [kind]: { id: uploadJson.id, ...(kind === 'document' ? { filename: fileName || 'file', caption } : { caption }) }
   };
-  const sendRes = await fetch(`https://graph.facebook.com/${VERSION}/${process.env.WA_PHONE_NUMBER_ID}/messages`, {
+  const sendRes = await fetch(`https://graph.facebook.com/${VERSION}/${cfg.phoneNumberId}/messages`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.WA_TOKEN}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   });
   const sendJson = await sendRes.json();
@@ -74,16 +78,16 @@ export async function sendMedia(to, { mediaData, mimeType, caption, fileName }) 
   return { id: sendJson.messages?.[0]?.id };
 }
 
-/** Fetches a received media item by its Graph API media id and returns it as a base64 data URL. */
-export async function downloadCloudMedia(mediaId) {
+/** Fetch a received media item by its Graph API media id, as a base64 data URL. */
+export async function downloadCloudMedia(cfg, mediaId) {
   const infoRes = await fetch(`https://graph.facebook.com/${VERSION}/${mediaId}`, {
-    headers: { Authorization: `Bearer ${process.env.WA_TOKEN}` }
+    headers: { Authorization: `Bearer ${cfg.token}` }
   });
   const info = await infoRes.json();
   if (!infoRes.ok || !info.url) throw new Error(info?.error?.message || 'Could not resolve media URL.');
   if (info.file_size && Number(info.file_size) > MAX_MEDIA_BYTES) return null;
 
-  const fileRes = await fetch(info.url, { headers: { Authorization: `Bearer ${process.env.WA_TOKEN}` } });
+  const fileRes = await fetch(info.url, { headers: { Authorization: `Bearer ${cfg.token}` } });
   if (!fileRes.ok) throw new Error('Could not download media file.');
   const buffer = Buffer.from(await fileRes.arrayBuffer());
   const mimetype = info.mime_type || 'application/octet-stream';
@@ -92,17 +96,23 @@ export async function downloadCloudMedia(mediaId) {
 
 const MEDIA_TYPES = ['image', 'video', 'audio', 'document', 'sticker'];
 
-/** Flatten a webhook payload into [{ from, name, body, wa_message_id, ts, media }]. `media` (if present) is { id, mime_type } — fetch it separately with downloadCloudMedia(). */
+/**
+ * Flatten a webhook payload into
+ * [{ phone_number_id, from, name, body, wa_message_id, ts, media }].
+ * phone_number_id identifies which tenant the message belongs to.
+ */
 export function parseWebhook(payload) {
   const out = [];
   for (const entry of payload?.entry || []) {
     for (const change of entry.changes || []) {
       const value = change.value || {};
+      const phoneNumberId = value.metadata?.phone_number_id || null;
       const contacts = value.contacts || [];
       for (const msg of value.messages || []) {
         const contact = contacts.find((c) => c.wa_id === msg.from);
         const mediaType = MEDIA_TYPES.find((t) => msg[t]);
         out.push({
+          phone_number_id: phoneNumberId,
           from: msg.from,
           name: contact?.profile?.name || null,
           body: msg.text?.body || msg.button?.text || (mediaType ? msg[mediaType]?.caption || null : `[${msg.type}]`),

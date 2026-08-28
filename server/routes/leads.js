@@ -3,6 +3,7 @@ import { q } from '../db.js';
 import { loadConnection, connConfigured, listLeadForms, fetchFormLeads, flattenLead, normalisePhone } from '../services/meta.js';
 import { sendText, sendMedia, cloudConfigured } from '../services/whatsappCloud.js';
 import { sendWebText, sendWebMedia, webStatus } from '../services/whatsappWeb.js';
+import { loadWaConnection } from '../services/waConnection.js';
 import { suggestReplies, chatProvider } from '../services/ai.js';
 
 export const leadsRouter = express.Router();
@@ -915,19 +916,20 @@ leadsRouter.post('/:id/messages', async (req, res, next) => {
     let waMessageId = null;
     try {
       const phone = lead[0].phone;
+      const wa = await loadWaConnection(uid);
       if (mediaData) {
         const opts = { mediaData, mimeType: mediaMime, caption: body || undefined, fileName };
-        const sent = cloudConfigured()
-          ? await sendMedia(phone, opts)
-          : webStatus().status === 'connected'
-            ? await sendWebMedia(phone, opts)
+        const sent = cloudConfigured(wa.cloud)
+          ? await sendMedia(wa.cloud, phone, opts)
+          : webStatus(uid).status === 'connected'
+            ? await sendWebMedia(uid, phone, opts)
             : null;
         waMessageId = sent?.id || null;
-      } else if (cloudConfigured()) {
-        const sent = await sendText(phone, body);
+      } else if (cloudConfigured(wa.cloud)) {
+        const sent = await sendText(wa.cloud, phone, body);
         waMessageId = sent?.id || null;
-      } else if (webStatus().status === 'connected') {
-        const sent = await sendWebText(phone, body);
+      } else if (webStatus(uid).status === 'connected') {
+        const sent = await sendWebText(uid, phone, body);
         waMessageId = sent?.id || null;
       }
     } catch (e) {
@@ -1007,7 +1009,8 @@ leadsRouter.post('/meta/sync', async (req, res, next) => {
 
 leadsRouter.post('/sync/whatsapp', async (req, res, next) => {
   try {
-    if (!webStatus().ready && !cloudConfigured()) {
+    const wa = await loadWaConnection(req.user.id);
+    if (webStatus(req.user.id).status !== 'connected' && !cloudConfigured(wa.cloud)) {
       return res.status(400).json({ error: 'WhatsApp is not connected.' });
     }
     res.json({ ok: true, message: 'WhatsApp messages are synced in real-time.' });
