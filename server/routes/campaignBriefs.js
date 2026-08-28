@@ -7,7 +7,7 @@ export const campaignBriefsRouter = express.Router();
  * Campaign briefs. The app only assembles and stores these — it never calls
  * Meta. Claude Code reads a brief (creative embedded), creates the real
  * campaign/ad-set/creative/ad via its Meta Ads MCP tools, all PAUSED, then
- * PATCHes the meta_* ids and status back here.
+ * PATCHes the meta_* ids and status back here. Every row belongs to one user.
  */
 
 const CREATIVE_FIELDS =
@@ -35,24 +35,24 @@ function hasLocation(audience) {
 }
 
 /**
- * Keep exactly one brief per creative in step with that creative's state.
- * Call after any change to a creative. A brief the user or Claude has already
- * pushed further (queued / created / live / archived) is left untouched.
- * Returns the brief (or null if the creative isn't campaign-bound yet).
+ * Keep exactly one brief per creative in step with that creative's state, within
+ * one user's workspace. A brief the user or Claude has already pushed further
+ * (queued / created / live / archived) is left untouched. Returns the brief (or
+ * null if the creative isn't campaign-bound yet).
  */
-export async function syncBriefForCreative(creativeId) {
-  if (!creativeId) return null;
+export async function syncBriefForCreative(userId, creativeId) {
+  if (!userId || !creativeId) return null;
   const { rows: cr } = await q(
     `SELECT id, label, headline, status, destination_type, destination_value, campaign_defaults
-       FROM creatives WHERE id = $1`,
-    [creativeId]
+       FROM creatives WHERE id = $1 AND user_id = $2`,
+    [creativeId, userId]
   );
   const creative = cr[0];
   if (!creative) return null;
 
   const { rows: br } = await q(
-    'SELECT * FROM campaign_briefs WHERE creative_id = $1 ORDER BY id DESC LIMIT 1',
-    [creativeId]
+    'SELECT * FROM campaign_briefs WHERE creative_id = $1 AND user_id = $2 ORDER BY id DESC LIMIT 1',
+    [creativeId, userId]
   );
   const brief = br[0] || null;
   if (brief && LOCKED_STATUSES.includes(brief.status)) return brief;
@@ -91,9 +91,9 @@ export async function syncBriefForCreative(creativeId) {
     return rows[0];
   }
   const { rows } = await q(
-    `INSERT INTO campaign_briefs (name, creative_id, daily_budget, audience, start_at, end_at, status)
-     VALUES ($1, $2, $3, COALESCE($4, '{}'::jsonb), $5, $6, $7) RETURNING *`,
-    [name, creativeId, daily_budget, JSON.stringify(audience), start_at, end_at, status]
+    `INSERT INTO campaign_briefs (name, creative_id, daily_budget, audience, start_at, end_at, status, user_id)
+     VALUES ($1, $2, $3, COALESCE($4, '{}'::jsonb), $5, $6, $7, $8) RETURNING *`,
+    [name, creativeId, daily_budget, JSON.stringify(audience), start_at, end_at, status, userId]
   );
   return rows[0];
 }
@@ -105,7 +105,9 @@ campaignBriefsRouter.get('/', async (req, res, next) => {
               c.destination_type AS creative_destination_type, c.status AS creative_status
        FROM campaign_briefs b
        LEFT JOIN creatives c ON c.id = b.creative_id
-       ORDER BY b.created_at DESC`
+       WHERE b.user_id = $1
+       ORDER BY b.created_at DESC`,
+      [req.user.id]
     );
     res.json(rows);
   } catch (e) {
@@ -115,12 +117,15 @@ campaignBriefsRouter.get('/', async (req, res, next) => {
 
 campaignBriefsRouter.get('/:id', async (req, res, next) => {
   try {
-    const { rows } = await q('SELECT * FROM campaign_briefs WHERE id = $1', [req.params.id]);
+    const { rows } = await q('SELECT * FROM campaign_briefs WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
     if (!rows.length) return res.status(404).json({ error: 'Brief not found.' });
     const brief = rows[0];
     let creative = null;
     if (brief.creative_id) {
-      const { rows: cr } = await q(`SELECT ${CREATIVE_FIELDS} FROM creatives WHERE id = $1`, [brief.creative_id]);
+      const { rows: cr } = await q(
+        `SELECT ${CREATIVE_FIELDS} FROM creatives WHERE id = $1 AND user_id = $2`,
+        [brief.creative_id, req.user.id]
+      );
       creative = cr[0] || null;
     }
     res.json({ ...brief, creative });
@@ -136,7 +141,10 @@ campaignBriefsRouter.post('/', async (req, res, next) => {
 
     let creative = null;
     if (creative_id) {
-      const { rows: cr } = await q('SELECT status, destination_type, destination_value FROM creatives WHERE id = $1', [creative_id]);
+      const { rows: cr } = await q(
+        'SELECT status, destination_type, destination_value FROM creatives WHERE id = $1 AND user_id = $2',
+        [creative_id, req.user.id]
+      );
       creative = cr[0] || null;
     }
     const draft = { name: String(name).trim(), daily_budget: daily_budget ?? null, status: 'draft' };
@@ -144,13 +152,13 @@ campaignBriefsRouter.post('/', async (req, res, next) => {
 
     const { rows } = await q(
       `INSERT INTO campaign_briefs
-         (name, objective, creative_id, daily_budget, audience, start_at, end_at, status, notes)
-       VALUES ($1, COALESCE($2,'OUTCOME_LEADS'), $3, $4, COALESCE($5,'{}'::jsonb), $6, $7, $8, $9)
+         (name, objective, creative_id, daily_budget, audience, start_at, end_at, status, notes, user_id)
+       VALUES ($1, COALESCE($2,'OUTCOME_LEADS'), $3, $4, COALESCE($5,'{}'::jsonb), $6, $7, $8, $9, $10)
        RETURNING *`,
       [
         draft.name, objective || null, creative_id || null, daily_budget ?? null,
         audience !== undefined ? JSON.stringify(audience) : null,
-        start_at || null, end_at || null, status, notes || null
+        start_at || null, end_at || null, status, notes || null, req.user.id
       ]
     );
     res.json(rows[0]);
@@ -162,7 +170,7 @@ campaignBriefsRouter.post('/', async (req, res, next) => {
 campaignBriefsRouter.patch('/:id', async (req, res, next) => {
   try {
     const b = req.body || {};
-    const { rows: existRows } = await q('SELECT * FROM campaign_briefs WHERE id = $1', [req.params.id]);
+    const { rows: existRows } = await q('SELECT * FROM campaign_briefs WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
     if (!existRows.length) return res.status(404).json({ error: 'Brief not found.' });
     const existing = existRows[0];
 
@@ -187,7 +195,10 @@ campaignBriefsRouter.patch('/:id', async (req, res, next) => {
     if (b.status === undefined && !LOCKED_STATUSES.includes(existing.status)) {
       let creative = null;
       if (next_.creative_id) {
-        const { rows: cr } = await q('SELECT status, destination_type, destination_value FROM creatives WHERE id = $1', [next_.creative_id]);
+        const { rows: cr } = await q(
+          'SELECT status, destination_type, destination_value FROM creatives WHERE id = $1 AND user_id = $2',
+          [next_.creative_id, req.user.id]
+        );
         creative = cr[0] || null;
       }
       status = computeStatus(next_, creative);
@@ -195,13 +206,13 @@ campaignBriefsRouter.patch('/:id', async (req, res, next) => {
 
     const { rows } = await q(
       `UPDATE campaign_briefs SET
-         name = $2, objective = $3, creative_id = $4, daily_budget = $5,
-         audience = $6, start_at = $7, end_at = $8, notes = $9, status = $10,
-         meta_campaign_id = $11, meta_adset_id = $12, meta_creative_id = $13,
-         meta_ad_id = $14, meta_image_hash = $15, updated_at = now()
-       WHERE id = $1 RETURNING *`,
+         name = $3, objective = $4, creative_id = $5, daily_budget = $6,
+         audience = $7, start_at = $8, end_at = $9, notes = $10, status = $11,
+         meta_campaign_id = $12, meta_adset_id = $13, meta_creative_id = $14,
+         meta_ad_id = $15, meta_image_hash = $16, updated_at = now()
+       WHERE id = $1 AND user_id = $2 RETURNING *`,
       [
-        req.params.id, next_.name, next_.objective, next_.creative_id, next_.daily_budget,
+        req.params.id, req.user.id, next_.name, next_.objective, next_.creative_id, next_.daily_budget,
         JSON.stringify(next_.audience || {}), next_.start_at, next_.end_at, next_.notes, status,
         next_.meta_campaign_id, next_.meta_adset_id, next_.meta_creative_id,
         next_.meta_ad_id, next_.meta_image_hash
@@ -215,7 +226,8 @@ campaignBriefsRouter.patch('/:id', async (req, res, next) => {
 
 campaignBriefsRouter.delete('/:id', async (req, res, next) => {
   try {
-    await q('DELETE FROM campaign_briefs WHERE id = $1', [req.params.id]);
+    const { rowCount } = await q('DELETE FROM campaign_briefs WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (!rowCount) return res.status(404).json({ error: 'Brief not found.' });
     res.json({ ok: true });
   } catch (e) {
     next(e);

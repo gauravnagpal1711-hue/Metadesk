@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import express from 'express';
-import { getSetting, setSetting } from '../db.js';
+import { getSetting, setSetting, q } from '../db.js';
 import {
   oauthConfigured,
   loginUrl,
@@ -15,12 +15,24 @@ export const facebookRouter = express.Router();
 
 const CONNECTION_KEY = 'meta_connection';
 // Short-lived states to guard the OAuth round trip against CSRF.
+// value: { userId, ts }
 const pendingStates = new Map();
 
-/** Load a saved connection from the DB into the live meta service. Called on boot. */
+async function firstUserId() {
+  const { rows } = await q('SELECT id FROM users ORDER BY id LIMIT 1');
+  return rows[0]?.id || null;
+}
+
+/**
+ * Load a saved connection into the live meta service. Called on boot.
+ * TODO(stage 3): the meta service holds a single global connection; until that
+ * becomes per-user, we restore the first user's connection as the active one.
+ */
 export async function restoreConnection() {
   try {
-    const saved = await getSetting(CONNECTION_KEY, null);
+    const uid = await firstUserId();
+    if (!uid) return;
+    const saved = await getSetting(uid, CONNECTION_KEY, null);
     if (saved?.accessToken) {
       setConnection(saved);
       console.log('Restored Meta connection for', saved.name || 'account');
@@ -43,9 +55,9 @@ facebookRouter.get('/connect', (req, res) => {
     return res.status(400).json({ error: 'Facebook login is not configured. Add FB_APP_ID and FB_APP_SECRET.' });
   }
   const state = crypto.randomBytes(16).toString('hex');
-  pendingStates.set(state, Date.now());
+  pendingStates.set(state, { userId: req.user.id, ts: Date.now() });
   // Forget states older than 10 minutes.
-  for (const [s, t] of pendingStates) if (Date.now() - t > 600000) pendingStates.delete(s);
+  for (const [s, v] of pendingStates) if (Date.now() - v.ts > 600000) pendingStates.delete(s);
   res.json({ url: loginUrl(state) });
 });
 
@@ -61,7 +73,8 @@ facebookRouter.get('/callback', async (req, res) => {
       </body>`);
 
   if (error) return close(error_description || String(error), false);
-  if (!state || !pendingStates.has(state)) return close('The login session expired. Please try again.', false);
+  const pending = state && pendingStates.get(state);
+  if (!pending) return close('The login session expired. Please try again.', false);
   pendingStates.delete(state);
 
   try {
@@ -78,7 +91,7 @@ facebookRouter.get('/callback', async (req, res) => {
       pageId: null,
       pageToken: null
     };
-    await setSetting(CONNECTION_KEY, conn);
+    await setSetting(pending.userId, CONNECTION_KEY, conn);
     setConnection(conn);
     close(`Signed in as ${me.name}. Choose your ad account and page back in the app.`, true);
   } catch (e) {
@@ -89,7 +102,7 @@ facebookRouter.get('/callback', async (req, res) => {
 /** After connecting, list what this user can choose from. */
 facebookRouter.get('/accounts', async (req, res, next) => {
   try {
-    const saved = await getSetting(CONNECTION_KEY, null);
+    const saved = await getSetting(req.user.id, CONNECTION_KEY, null);
     if (!saved?.accessToken) return res.status(400).json({ error: 'Connect Facebook first.' });
     const [adAccounts, pages] = await Promise.all([
       fetchAdAccounts(saved.accessToken),
@@ -105,7 +118,7 @@ facebookRouter.get('/accounts', async (req, res, next) => {
 facebookRouter.post('/select', async (req, res, next) => {
   try {
     const { adAccountId, pageId } = req.body || {};
-    const saved = await getSetting(CONNECTION_KEY, null);
+    const saved = await getSetting(req.user.id, CONNECTION_KEY, null);
     if (!saved?.accessToken) return res.status(400).json({ error: 'Connect Facebook first.' });
 
     let pageToken = null;
@@ -115,7 +128,7 @@ facebookRouter.post('/select', async (req, res, next) => {
     }
 
     const conn = { ...saved, adAccountId: adAccountId || saved.adAccountId, pageId: pageId || saved.pageId, pageToken };
-    await setSetting(CONNECTION_KEY, conn);
+    await setSetting(req.user.id, CONNECTION_KEY, conn);
     setConnection(conn);
     res.json({ ok: true, connection: getConnection() });
   } catch (e) {
@@ -125,7 +138,7 @@ facebookRouter.post('/select', async (req, res, next) => {
 
 facebookRouter.post('/disconnect', async (req, res, next) => {
   try {
-    await setSetting(CONNECTION_KEY, {});
+    await setSetting(req.user.id, CONNECTION_KEY, {});
     setConnection({ accessToken: null, adAccountId: null, pageId: null, pageToken: null, name: null, connectedAt: null });
     res.json({ ok: true });
   } catch (e) {

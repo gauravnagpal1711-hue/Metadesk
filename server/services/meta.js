@@ -197,27 +197,27 @@ export async function searchGeo(qStr) {
 
 const SHOP_LOCATION_KEY = 'shop_location';
 
-/** The shopkeeper's saved shop location — every campaign defaults to "near here". */
-export async function getShopLocation() {
+/** The shopkeeper's saved shop location — every campaign defaults to "near here". Per user. */
+export async function getShopLocation(userId) {
   try {
-    return (await getSetting(SHOP_LOCATION_KEY, null)) || null;
+    return (await getSetting(userId, SHOP_LOCATION_KEY, null)) || null;
   } catch {
     return null;
   }
 }
 
-export async function setShopLocation(loc) {
+export async function setShopLocation(userId, loc) {
   if (loc && loc.lat != null && loc.lng != null) {
-    await setSetting(SHOP_LOCATION_KEY, {
+    await setSetting(userId, SHOP_LOCATION_KEY, {
       lat: Number(loc.lat),
       lng: Number(loc.lng),
       label: String(loc.label || 'My shop').slice(0, 80),
       radius_km: Math.min(80, Math.max(1, Number(loc.radius_km) || 5))
     });
   } else {
-    await setSetting(SHOP_LOCATION_KEY, null);
+    await setSetting(userId, SHOP_LOCATION_KEY, null);
   }
-  return getShopLocation();
+  return getShopLocation(userId);
 }
 
 /** Interest type-ahead for the Advanced targeting section. */
@@ -238,9 +238,9 @@ export async function searchInterests(qStr) {
  * WA_DISPLAY_NUMBER env → the paired WhatsApp-Web number.
  * `manual` is true when the value came from the saved setting.
  */
-export async function resolveWhatsappNumber() {
+export async function resolveWhatsappNumber(userId) {
   try {
-    const saved = await getSetting(WA_SETTING_KEY, null);
+    const saved = await getSetting(userId, WA_SETTING_KEY, null);
     if (saved) return { number: String(saved).replace(/\D/g, ''), source: 'saved', manual: true };
   } catch {
     /* settings table not ready */
@@ -271,11 +271,11 @@ export async function resolveWhatsappNumber() {
   return { number: null, source: null, manual: false };
 }
 
-/** Save (or clear, with null/'') the campaign WhatsApp number. */
-export async function setWhatsappNumber(raw) {
+/** Save (or clear, with null/'') the campaign WhatsApp number. Per user. */
+export async function setWhatsappNumber(userId, raw) {
   const digits = String(raw || '').replace(/\D/g, '');
-  await setSetting(WA_SETTING_KEY, digits || null);
-  return resolveWhatsappNumber();
+  await setSetting(userId, WA_SETTING_KEY, digits || null);
+  return resolveWhatsappNumber(userId);
 }
 
 /** Page info the form flow needs: id, name, and whether lead terms are accepted. */

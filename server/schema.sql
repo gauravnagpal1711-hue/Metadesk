@@ -1,5 +1,16 @@
 -- Meta Ads Manager schema. Safe to run on every boot.
 
+-- Tenants. One user = one business = one isolated workspace. Domain tables get a
+-- user_id column in a later migration; for now this just backs login/signup.
+CREATE TABLE IF NOT EXISTS users (
+id SERIAL PRIMARY KEY,
+username TEXT UNIQUE NOT NULL,
+password_hash TEXT NOT NULL,
+business_name TEXT,
+created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+last_login_at TIMESTAMPTZ
+);
+
 CREATE TABLE IF NOT EXISTS creatives (
 id SERIAL PRIMARY KEY,
 kind TEXT NOT NULL DEFAULT 'image', -- image | video
@@ -138,6 +149,8 @@ key TEXT PRIMARY KEY,
 value JSONB NOT NULL,
 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- settings is per-tenant: db.js backfills user_id and swaps the primary key to
+-- (user_id, key) once the first user exists.
 
 CREATE TABLE IF NOT EXISTS pending_messages (
 id SERIAL PRIMARY KEY,
@@ -207,5 +220,50 @@ meta_ad_id TEXT,
 meta_image_hash TEXT,
 notes TEXT,
 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Multi-tenant. Every workspace row belongs to a user (= one business). Columns
+-- are added nullable here; db.js backfills them to the first user, then the app
+-- filters every read and stamps every write with req.user.id.
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE creatives        ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE campaigns        ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE stages           ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE leads            ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE messages         ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE remarks          ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE activity         ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE tasks            ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE saved_views      ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE pending_messages ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE campaign_edits   ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE campaign_briefs  ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE settings         ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS creatives_user_idx        ON creatives(user_id);
+CREATE INDEX IF NOT EXISTS campaigns_user_idx        ON campaigns(user_id);
+CREATE INDEX IF NOT EXISTS stages_user_idx           ON stages(user_id);
+CREATE INDEX IF NOT EXISTS leads_user_idx            ON leads(user_id);
+CREATE INDEX IF NOT EXISTS messages_user_idx         ON messages(user_id);
+CREATE INDEX IF NOT EXISTS tasks_user_idx            ON tasks(user_id);
+CREATE INDEX IF NOT EXISTS saved_views_user_idx      ON saved_views(user_id);
+CREATE INDEX IF NOT EXISTS campaign_briefs_user_idx  ON campaign_briefs(user_id);
+CREATE INDEX IF NOT EXISTS campaign_edits_user_idx   ON campaign_edits(user_id);
+CREATE INDEX IF NOT EXISTS pending_messages_user_idx ON pending_messages(user_id);
+
+-- Per-tenant Meta connection (replaces the single global 'meta_connection'
+-- setting). One row per user.
+CREATE TABLE IF NOT EXISTS meta_connections (
+user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+access_token TEXT,
+fb_user_id TEXT,
+fb_name TEXT,
+ad_account_id TEXT,
+page_id TEXT,
+page_token TEXT,
+expires_at TIMESTAMPTZ,
+connected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

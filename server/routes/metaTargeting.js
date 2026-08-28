@@ -39,7 +39,7 @@ metaTargetingRouter.get('/interests', async (req, res, next) => {
 
 metaTargetingRouter.get('/whatsapp-number', async (req, res, next) => {
   try {
-    res.json(await resolveWhatsappNumber());
+    res.json(await resolveWhatsappNumber(req.user.id));
   } catch (e) {
     next(e);
   }
@@ -52,7 +52,7 @@ metaTargetingRouter.post('/whatsapp-number', async (req, res, next) => {
     if (digits && (digits.length < 10 || digits.length > 15)) {
       return res.status(400).json({ error: 'Enter the number with country code, digits only (e.g. 919354260517).' });
     }
-    res.json(await setWhatsappNumber(digits));
+    res.json(await setWhatsappNumber(req.user.id, digits));
   } catch (e) {
     next(e);
   }
@@ -61,7 +61,7 @@ metaTargetingRouter.post('/whatsapp-number', async (req, res, next) => {
 /** Clear the saved number and go back to auto-detection. */
 metaTargetingRouter.delete('/whatsapp-number', async (req, res, next) => {
   try {
-    res.json(await setWhatsappNumber(null));
+    res.json(await setWhatsappNumber(req.user.id, null));
   } catch (e) {
     next(e);
   }
@@ -78,7 +78,7 @@ metaTargetingRouter.get('/page', async (req, res, next) => {
 /** The shopkeeper's saved shop location — campaigns default to "near here". */
 metaTargetingRouter.get('/shop-location', async (req, res, next) => {
   try {
-    res.json(await getShopLocation());
+    res.json(await getShopLocation(req.user.id));
   } catch (e) {
     next(e);
   }
@@ -86,7 +86,7 @@ metaTargetingRouter.get('/shop-location', async (req, res, next) => {
 
 metaTargetingRouter.post('/shop-location', async (req, res, next) => {
   try {
-    res.json(await setShopLocation(req.body || {}));
+    res.json(await setShopLocation(req.user.id, req.body || {}));
   } catch (e) {
     next(e);
   }
@@ -94,7 +94,7 @@ metaTargetingRouter.post('/shop-location', async (req, res, next) => {
 
 metaTargetingRouter.delete('/shop-location', async (req, res, next) => {
   try {
-    res.json(await setShopLocation(null));
+    res.json(await setShopLocation(req.user.id, null));
   } catch (e) {
     next(e);
   }

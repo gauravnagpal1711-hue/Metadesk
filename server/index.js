@@ -67,19 +67,27 @@ app.use((err, req, res, next) => {
 
 async function syncEverything() {
   if (!metaConfigured()) return;
+
+  // TODO(stage 3): loop every user with a connected Meta account. Today there is
+  // one global connection, so the sync writes into the first user's workspace.
+  const { rows: firstU } = await q('SELECT id FROM users ORDER BY id LIMIT 1');
+  const uid = firstU[0]?.id;
+  if (!uid) return;
+
   try {
     const campaigns = await listCampaigns();
     for (const c of campaigns) {
       await q(
-        `INSERT INTO campaigns (id,name,objective,status,effective_status,daily_budget,lifetime_budget,
+        `INSERT INTO campaigns (id,user_id,name,objective,status,effective_status,daily_budget,lifetime_budget,
         spend,impressions,clicks,leads_count,ctr,cpl,raw,synced_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now())
         ON CONFLICT (id) DO UPDATE SET
+        user_id=EXCLUDED.user_id,
         name=EXCLUDED.name, status=EXCLUDED.status, effective_status=EXCLUDED.effective_status,
         daily_budget=EXCLUDED.daily_budget, spend=EXCLUDED.spend, impressions=EXCLUDED.impressions,
         clicks=EXCLUDED.clicks, leads_count=EXCLUDED.leads_count, ctr=EXCLUDED.ctr, cpl=EXCLUDED.cpl,
         raw=EXCLUDED.raw, synced_at=now()`,
-        [c.id, c.name, c.objective, c.status, c.effective_status, c.daily_budget, c.lifetime_budget,
+        [c.id, uid, c.name, c.objective, c.status, c.effective_status, c.daily_budget, c.lifetime_budget,
         c.spend, c.impressions, c.clicks, c.leads_count, c.ctr, c.cpl, JSON.stringify(c.raw)]
       );
     }
@@ -93,7 +101,7 @@ async function syncEverything() {
   if (!pageId) return;
   try {
     const forms = await listLeadForms(pageId);
-    const { rows: firstStage } = await q('SELECT id FROM stages ORDER BY position LIMIT 1');
+    const { rows: firstStage } = await q('SELECT id FROM stages WHERE user_id = $1 ORDER BY position LIMIT 1', [uid]);
     for (const form of forms) {
       const leads = await fetchFormLeads(form.id);
       for (const raw of leads) {
@@ -104,8 +112,8 @@ async function syncEverything() {
         // Insert or update the lead as Meta-verified
         await q(
           `INSERT INTO leads (meta_lead_id, form_id, campaign_id, campaign_name, full_name, phone, email, city,
-          source, wants_whatsapp, is_meta_verified, stage_id, fields, created_at)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'meta',$9,true,$10,$11,$12)
+          source, wants_whatsapp, is_meta_verified, stage_id, fields, created_at, user_id)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'meta',$9,true,$10,$11,$12,$13)
           ON CONFLICT (meta_lead_id) DO UPDATE SET
             is_meta_verified = true,
             wants_whatsapp = EXCLUDED.wants_whatsapp,
@@ -113,36 +121,36 @@ async function syncEverything() {
             updated_at = now()`,
           [raw.id, raw.form_id || form.id, raw.campaign_id || null, raw.campaign_name || form.name,
           flat.full_name, normalizedPhone, flat.email, flat.city, wantsWhatsApp,
-          firstStage[0]?.id, JSON.stringify(flat.fields), raw.created_time || new Date()]
+          firstStage[0]?.id, JSON.stringify(flat.fields), raw.created_time || new Date(), uid]
         );
 
         // Upgrade any pending WhatsApp leads with the same phone to Meta-verified
         const { rows: upgradedLeads } = await q(
-          `UPDATE leads 
+          `UPDATE leads
            SET is_meta_verified = true, meta_lead_id = $1, source = 'meta', updated_at = now()
-           WHERE phone = $2 AND source = 'whatsapp' AND is_meta_verified = false
+           WHERE phone = $2 AND source = 'whatsapp' AND is_meta_verified = false AND user_id = $3
            RETURNING id`,
-          [raw.id, normalizedPhone]
+          [raw.id, normalizedPhone, uid]
         );
 
         // Attach pending messages to this lead
         if (upgradedLeads.length > 0) {
           const leadId = upgradedLeads[0].id;
           const { rows: pendingMsgs } = await q(
-            `SELECT * FROM pending_messages WHERE phone = $1 ORDER BY created_at ASC`,
-            [normalizedPhone]
+            `SELECT * FROM pending_messages WHERE phone = $1 AND user_id = $2 ORDER BY created_at ASC`,
+            [normalizedPhone, uid]
           );
 
           for (const msg of pendingMsgs) {
             await q(
-              `INSERT INTO messages (lead_id, direction, channel, body, created_at)
-              VALUES ($1, 'in', $2, $3, $4)`,
-              [leadId, msg.channel, msg.body, msg.created_at]
+              `INSERT INTO messages (lead_id, direction, channel, body, created_at, user_id)
+              VALUES ($1, 'in', $2, $3, $4, $5)`,
+              [leadId, msg.channel, msg.body, msg.created_at, uid]
             );
           }
 
           // Clean up pending messages
-          await q(`DELETE FROM pending_messages WHERE phone = $1`, [normalizedPhone]);
+          await q(`DELETE FROM pending_messages WHERE phone = $1 AND user_id = $2`, [normalizedPhone, uid]);
           console.log(`[Meta Sync] Upgraded pending lead for ${normalizedPhone} - attached ${pendingMsgs.length} queued messages`);
         }
       }
@@ -154,7 +162,10 @@ async function syncEverything() {
 
 const SYNC_MINUTES = Number(process.env.SYNC_INTERVAL_MINUTES || 10);
 
-initDb()
+// Tests import { app } and drive it directly; skip the real boot + timers.
+export { app };
+
+if (process.env.ADS_DESK_NO_BOOT !== '1') initDb()
   .then(async () => {
     // Reload any Facebook connection saved from a previous OAuth login.
     await restoreConnection().catch((e) => console.error('Restore connection failed:', e.message));
