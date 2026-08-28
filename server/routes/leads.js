@@ -6,6 +6,76 @@ import { sendWebText, sendWebMedia, webStatus } from '../services/whatsappWeb.js
 
 export const leadsRouter = express.Router();
 
+/** Per-lead computed columns shared by the board feed and the table (list) feed. */
+const LEAD_ENRICH = `
+  (SELECT count(*)::int FROM messages m WHERE m.lead_id = l.id) AS message_count,
+  (SELECT count(*)::int FROM remarks r WHERE r.lead_id = l.id) AS remark_count,
+  (SELECT max(created_at) FROM messages m WHERE m.lead_id = l.id) AS last_message_at,
+  (SELECT count(*)::int FROM tasks t WHERE t.lead_id = l.id AND t.done = false) AS open_task_count,
+  (SELECT min(due_at) FROM tasks t WHERE t.lead_id = l.id AND t.done = false) AS next_task_due_at`;
+
+const LIST_SORT_COLUMNS = {
+  created: 'l.created_at',
+  updated: 'l.updated_at',
+  name: 'l.full_name',
+  value: 'COALESCE(l.value,0)',
+  followup: 'l.followup_date',
+  appointment: 'l.appointment_date',
+  last_contacted: 'l.last_contacted_at',
+  stage: 'l.stage_id'
+};
+
+const asArray = (v) => (Array.isArray(v) ? v : v != null && v !== '' ? [v] : []);
+
+/**
+ * Turns the query string of GET /list and GET /export.csv into a parameterised
+ * WHERE clause. Every stage/source/campaign/tag/date/value/text filter is optional.
+ */
+function buildLeadFilter(query) {
+  const clauses = ['l.is_meta_verified = true'];
+  const params = [];
+  const add = (v) => { params.push(v); return `$${params.length}`; };
+
+  const stageIds = asArray(query.stage_id).map(Number).filter(Number.isFinite);
+  if (stageIds.length) clauses.push(`l.stage_id = ANY(${add(stageIds)}::int[])`);
+
+  const sources = asArray(query.source);
+  if (sources.length) clauses.push(`l.source = ANY(${add(sources)}::text[])`);
+
+  const campaigns = asArray(query.campaign);
+  if (campaigns.length) clauses.push(`l.campaign_name = ANY(${add(campaigns)}::text[])`);
+
+  const tags = asArray(query.tag);
+  if (tags.length) clauses.push(`l.tags && ${add(tags)}::text[]`);
+
+  if (query.value_min !== undefined && query.value_min !== '') clauses.push(`COALESCE(l.value,0) >= ${add(Number(query.value_min))}`);
+  if (query.value_max !== undefined && query.value_max !== '') clauses.push(`COALESCE(l.value,0) <= ${add(Number(query.value_max))}`);
+  if (query.created_after) clauses.push(`l.created_at >= ${add(query.created_after)}`);
+  if (query.created_before) clauses.push(`l.created_at <= ${add(query.created_before)}`);
+
+  const dateBucket = (col, bucket) => {
+    if (bucket === 'overdue') clauses.push(`(l.${col} IS NOT NULL AND l.${col} < now())`);
+    else if (bucket === 'today') clauses.push(`(l.${col} >= date_trunc('day', now()) AND l.${col} < date_trunc('day', now()) + interval '1 day')`);
+    else if (bucket === 'next7') clauses.push(`(l.${col} >= now() AND l.${col} < now() + interval '7 days')`);
+    else if (bucket === 'none') clauses.push(`l.${col} IS NULL`);
+  };
+  if (query.followup) dateBucket('followup_date', query.followup);
+  if (query.appointment) dateBucket('appointment_date', query.appointment);
+
+  if (query.q && String(query.q).trim()) {
+    const like = add(`%${String(query.q).trim().toLowerCase()}%`);
+    clauses.push(`(lower(l.full_name) LIKE ${like} OR lower(l.phone) LIKE ${like} OR lower(coalesce(l.email,'')) LIKE ${like} OR lower(coalesce(l.city,'')) LIKE ${like} OR lower(coalesce(l.campaign_name,'')) LIKE ${like})`);
+  }
+
+  return { where: clauses.join(' AND '), params };
+}
+
+function parseListSort(sortParam) {
+  const [field, dir] = String(sortParam || 'created:desc').split(':');
+  const col = LIST_SORT_COLUMNS[field] || LIST_SORT_COLUMNS.created;
+  return `${col} ${dir === 'asc' ? 'ASC' : 'DESC'} NULLS LAST, l.id DESC`;
+}
+
 /* ---------- stages ---------- */
 
 leadsRouter.get('/stages', async (req, res, next) => {
@@ -34,13 +104,14 @@ leadsRouter.post('/stages', async (req, res, next) => {
 
 leadsRouter.patch('/stages/:id', async (req, res, next) => {
   try {
-    const { name, color, position, requires_appointment_date, requires_followup_date } = req.body || {};
+    const { name, color, position, requires_appointment_date, requires_followup_date, is_won, is_lost } = req.body || {};
     const { rows } = await q(
       `UPDATE stages SET name=COALESCE($2,name), color=COALESCE($3,color), position=COALESCE($4,position),
       requires_appointment_date=COALESCE($5,requires_appointment_date),
-      requires_followup_date=COALESCE($6,requires_followup_date)
+      requires_followup_date=COALESCE($6,requires_followup_date),
+      is_won=COALESCE($7,is_won), is_lost=COALESCE($8,is_lost)
       WHERE id=$1 RETURNING *`,
-      [req.params.id, name, color, position, requires_appointment_date, requires_followup_date]
+      [req.params.id, name, color, position, requires_appointment_date, requires_followup_date, is_won, is_lost]
     );
     res.json(rows[0]);
   } catch (e) {
@@ -64,15 +135,330 @@ leadsRouter.get('/board', async (req, res, next) => {
   try {
     const { rows: stages } = await q('SELECT * FROM stages ORDER BY position');
     const { rows: leads } = await q(
-      `SELECT l.*,
-      (SELECT count(*)::int FROM messages m WHERE m.lead_id = l.id) AS message_count,
-      (SELECT count(*)::int FROM remarks r WHERE r.lead_id = l.id) AS remark_count,
-      (SELECT max(created_at) FROM messages m WHERE m.lead_id = l.id) AS last_message_at
+      `SELECT l.*, ${LEAD_ENRICH}
       FROM leads l
       WHERE l.is_meta_verified = true
       ORDER BY l.board_order ASC, l.created_at DESC`
     );
     res.json({ stages, leads });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ---------- table view / filtering / bulk / tasks / views / analytics ----------
+ * These collection routes MUST be declared before the "/:id" routes below, or
+ * Express matches e.g. GET /leads/list as GET /leads/:id with id="list". */
+
+/** Paginated, server-filtered feed for the table layout. */
+leadsRouter.get('/list', async (req, res, next) => {
+  try {
+    const { where, params } = buildLeadFilter(req.query);
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const pageSize = Math.min(200, Math.max(1, Number(req.query.pageSize) || 50));
+    const orderBy = parseListSort(req.query.sort);
+
+    const { rows: countRows } = await q(`SELECT count(*)::int AS total FROM leads l WHERE ${where}`, params);
+    const { rows } = await q(
+      `SELECT l.*, s.name AS stage_name, s.color AS stage_color, s.is_won AS stage_is_won, s.is_lost AS stage_is_lost,
+      ${LEAD_ENRICH}
+      FROM leads l
+      LEFT JOIN stages s ON s.id = l.stage_id
+      WHERE ${where}
+      ORDER BY ${orderBy}
+      LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`,
+      params
+    );
+    res.json({ rows, total: countRows[0].total, page, pageSize });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Same filters as /list, no pagination — streamed as a CSV download. */
+leadsRouter.get('/export.csv', async (req, res, next) => {
+  try {
+    const { where, params } = buildLeadFilter(req.query);
+    const { rows } = await q(
+      `SELECT l.full_name, l.phone, l.email, l.city, l.campaign_name, s.name AS stage_name,
+      l.value, l.tags, l.source, l.created_at, l.last_contacted_at, l.appointment_date,
+      l.followup_date, l.lost_reason
+      FROM leads l LEFT JOIN stages s ON s.id = l.stage_id
+      WHERE ${where}
+      ORDER BY l.created_at DESC`,
+      params
+    );
+    const headers = ['Name', 'Phone', 'Email', 'City', 'Campaign', 'Stage', 'Value', 'Tags', 'Source', 'Created', 'Last contacted', 'Appointment', 'Followup', 'Lost reason'];
+    const cell = (v) => {
+      if (v == null) return '';
+      const s = Array.isArray(v) ? v.join('; ') : v instanceof Date ? v.toISOString() : String(v);
+      return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [headers.join(',')];
+    for (const r of rows) {
+      lines.push([r.full_name, r.phone, r.email, r.city, r.campaign_name, r.stage_name, r.value,
+        r.tags, r.source, r.created_at, r.last_contacted_at, r.appointment_date, r.followup_date, r.lost_reason].map(cell).join(','));
+    }
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="ads-desk-leads-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send('﻿' + lines.join('\r\n'));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Pipeline reporting for the Insights tab. One object, all plain SQL aggregates. */
+leadsRouter.get('/analytics', async (req, res, next) => {
+  try {
+    const params = [];
+    const add = (v) => { params.push(v); return `$${params.length}`; };
+    const clauses = ['l.is_meta_verified = true'];
+    if (req.query.from) clauses.push(`l.created_at >= ${add(req.query.from)}`);
+    if (req.query.to) clauses.push(`l.created_at <= ${add(req.query.to)}`);
+    const campaigns = asArray(req.query.campaign);
+    if (campaigns.length) clauses.push(`l.campaign_name = ANY(${add(campaigns)}::text[])`);
+    const rw = clauses.join(' AND ');
+
+    const { rows: byStage } = await q(
+      `SELECT s.id AS stage_id, s.name, s.color, s.position, s.is_won, s.is_lost,
+       count(l.id)::int AS count, COALESCE(sum(l.value),0)::float AS value
+       FROM stages s LEFT JOIN leads l ON l.stage_id = s.id AND ${rw}
+       GROUP BY s.id ORDER BY s.position`,
+      params
+    );
+
+    const won = byStage.filter((s) => s.is_won).reduce((a, s) => ({ count: a.count + s.count, value: a.value + s.value }), { count: 0, value: 0 });
+    const lost = byStage.filter((s) => s.is_lost).reduce((a, s) => a + s.count, 0);
+    const open = byStage.filter((s) => !s.is_won && !s.is_lost).reduce((a, s) => ({ count: a.count + s.count, value: a.value + s.value }), { count: 0, value: 0 });
+
+    const [lostReasons, bySource, byCampaign, newLeads, daily, velocity, stale] = await Promise.all([
+      q(`SELECT COALESCE(NULLIF(trim(l.lost_reason), ''), 'Not specified') AS reason, count(*)::int AS count
+         FROM leads l JOIN stages s ON s.id = l.stage_id WHERE s.is_lost AND ${rw}
+         GROUP BY reason ORDER BY count DESC LIMIT 10`, params),
+      q(`SELECT COALESCE(l.source,'unknown') AS source, count(*)::int AS count
+         FROM leads l WHERE ${rw} GROUP BY l.source ORDER BY count DESC`, params),
+      q(`SELECT COALESCE(l.campaign_name,'No campaign') AS campaign_name, count(*)::int AS count,
+         (count(*) FILTER (WHERE s.is_won))::int AS won,
+         COALESCE((sum(l.value) FILTER (WHERE s.is_won)),0)::float AS won_value
+         FROM leads l LEFT JOIN stages s ON s.id = l.stage_id WHERE ${rw}
+         GROUP BY campaign_name ORDER BY count DESC LIMIT 15`, params),
+      q(`SELECT
+         (count(*) FILTER (WHERE created_at >= date_trunc('day', now())))::int AS today,
+         (count(*) FILTER (WHERE created_at >= date_trunc('week', now())))::int AS this_week,
+         (count(*) FILTER (WHERE created_at >= date_trunc('month', now())))::int AS this_month
+         FROM leads WHERE is_meta_verified = true`),
+      q(`SELECT to_char(date_trunc('day', l.created_at), 'YYYY-MM-DD') AS date, count(*)::int AS count
+         FROM leads l WHERE ${rw} GROUP BY 1 ORDER BY 1`, params),
+      q(`SELECT
+         (avg(EXTRACT(EPOCH FROM (l.stage_changed_at - l.created_at))/86400.0)
+           FILTER (WHERE s.is_won))::float AS avg_days_to_won,
+         (avg(EXTRACT(EPOCH FROM (l.last_contacted_at - l.created_at))/86400.0)
+           FILTER (WHERE l.last_contacted_at IS NOT NULL))::float AS avg_days_to_contact,
+         (avg(EXTRACT(EPOCH FROM (now() - l.stage_changed_at))/86400.0)
+           FILTER (WHERE NOT s.is_won AND NOT s.is_lost))::float AS avg_days_in_stage
+         FROM leads l LEFT JOIN stages s ON s.id = l.stage_id WHERE ${rw}`, params),
+      q(`SELECT count(*)::int AS count
+         FROM leads l JOIN stages s ON s.id = l.stage_id
+         WHERE NOT s.is_won AND NOT s.is_lost AND l.is_meta_verified = true
+         AND l.created_at < now() - interval '7 days'
+         AND (l.last_contacted_at IS NULL OR l.last_contacted_at < now() - interval '7 days')`)
+    ]);
+
+    // Funnel: ordered non-lost stages with conversion % to the next.
+    const funnelStages = byStage.filter((s) => !s.is_lost);
+    const funnel = funnelStages.map((s, i) => {
+      const next = funnelStages[i + 1];
+      return { ...s, conversion_to_next: next && s.count > 0 ? next.count / s.count : null };
+    });
+
+    res.json({
+      total: byStage.reduce((a, s) => a + s.count, 0),
+      by_stage: byStage,
+      funnel,
+      open,
+      won: { ...won, avg_value: won.count ? won.value / won.count : 0 },
+      lost: { count: lost, reasons: lostReasons.rows },
+      win_rate: won.count + lost > 0 ? won.count / (won.count + lost) : null,
+      new_leads: { ...newLeads.rows[0], daily: daily.rows },
+      by_source: bySource.rows,
+      by_campaign: byCampaign.rows,
+      velocity: velocity.rows[0],
+      stale: stale.rows[0].count
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ---------- tasks ---------- */
+
+/** Cross-lead task queue for the "Today / Overdue" strip. */
+leadsRouter.get('/tasks', async (req, res, next) => {
+  try {
+    const scope = req.query.scope || 'all';
+    const includeDone = req.query.include_done === 'true' || req.query.include_done === '1';
+    const clauses = [];
+    if (!includeDone) clauses.push('t.done = false');
+    if (scope === 'today') clauses.push(`t.due_at < date_trunc('day', now()) + interval '1 day'`);
+    else if (scope === 'overdue') clauses.push('t.due_at < now()');
+    else if (scope === 'upcoming') clauses.push('t.due_at >= now()');
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const { rows } = await q(
+      `SELECT t.*, l.full_name AS lead_name, l.phone AS lead_phone, l.stage_id,
+       s.name AS stage_name, s.color AS stage_color
+       FROM tasks t JOIN leads l ON l.id = t.lead_id LEFT JOIN stages s ON s.id = l.stage_id
+       ${where}
+       ORDER BY t.done ASC, t.due_at ASC NULLS LAST, t.created_at DESC
+       LIMIT 500`
+    );
+    res.json(rows);
+  } catch (e) {
+    next(e);
+  }
+});
+
+leadsRouter.patch('/tasks/:taskId', async (req, res, next) => {
+  try {
+    const { done, title, due_at, kind } = req.body || {};
+    const { rows: existing } = await q('SELECT * FROM tasks WHERE id=$1', [req.params.taskId]);
+    if (!existing.length) return res.status(404).json({ error: 'Task not found.' });
+    const task = existing[0];
+    const nextDone = done === undefined ? task.done : !!done;
+    const { rows } = await q(
+      `UPDATE tasks SET
+       done = $2,
+       done_at = CASE WHEN $2 AND NOT done THEN now() WHEN NOT $2 THEN NULL ELSE done_at END,
+       title = COALESCE($3, title),
+       due_at = $4,
+       kind = COALESCE($5, kind)
+       WHERE id = $1 RETURNING *`,
+      [req.params.taskId, nextDone, title ?? null, due_at === undefined ? task.due_at : (due_at || null), kind ?? null]
+    );
+    if (nextDone && !task.done) {
+      await q(`INSERT INTO activity (lead_id, kind, detail) VALUES ($1,'task_done',$2)`, [task.lead_id, `Task done: ${rows[0].title}`]);
+      if (['call', 'meeting', 'whatsapp', 'email'].includes(rows[0].kind)) {
+        await q(`UPDATE leads SET last_contacted_at = now(), updated_at = now() WHERE id = $1`, [task.lead_id]);
+      }
+    }
+    res.json(rows[0]);
+  } catch (e) {
+    next(e);
+  }
+});
+
+leadsRouter.delete('/tasks/:taskId', async (req, res, next) => {
+  try {
+    await q('DELETE FROM tasks WHERE id=$1', [req.params.taskId]);
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ---------- saved views ---------- */
+
+leadsRouter.get('/views', async (req, res, next) => {
+  try {
+    const { rows } = await q('SELECT * FROM saved_views ORDER BY position, id');
+    res.json(rows);
+  } catch (e) {
+    next(e);
+  }
+});
+
+leadsRouter.post('/views', async (req, res, next) => {
+  try {
+    const { name, filters, layout } = req.body || {};
+    if (!name || !String(name).trim()) return res.status(400).json({ error: 'Name the view.' });
+    const { rows: max } = await q('SELECT COALESCE(MAX(position),-1)+1 AS p FROM saved_views');
+    const { rows } = await q(
+      'INSERT INTO saved_views (name, filters, layout, position) VALUES ($1,$2,$3,$4) RETURNING *',
+      [String(name).trim(), JSON.stringify(filters || {}), layout === 'table' ? 'table' : 'board', max[0].p]
+    );
+    res.json(rows[0]);
+  } catch (e) {
+    next(e);
+  }
+});
+
+leadsRouter.patch('/views/:id', async (req, res, next) => {
+  try {
+    const { name, filters, layout, position } = req.body || {};
+    const { rows } = await q(
+      `UPDATE saved_views SET name=COALESCE($2,name),
+       filters=COALESCE($3,filters), layout=COALESCE($4,layout), position=COALESCE($5,position)
+       WHERE id=$1 RETURNING *`,
+      [req.params.id, name ?? null, filters !== undefined ? JSON.stringify(filters) : null, layout ?? null, position ?? null]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'View not found.' });
+    res.json(rows[0]);
+  } catch (e) {
+    next(e);
+  }
+});
+
+leadsRouter.delete('/views/:id', async (req, res, next) => {
+  try {
+    await q('DELETE FROM saved_views WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ---------- bulk actions ---------- */
+
+leadsRouter.patch('/bulk-update', async (req, res, next) => {
+  try {
+    const { ids, stage_id, add_tags, remove_tags, campaign_name, lost_reason } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'No leads selected.' });
+    const numIds = ids.map(Number).filter(Number.isFinite);
+    let moved = 0;
+
+    if (stage_id !== undefined) {
+      const { rows: s } = await q('SELECT name, is_lost FROM stages WHERE id=$1', [stage_id]);
+      const isLost = !!s[0]?.is_lost;
+      for (const id of numIds) {
+        await q(
+          `UPDATE leads SET stage_id=$2, stage_changed_at=now(),
+           lost_reason = CASE WHEN $3 THEN COALESCE($4, lost_reason) ELSE NULL END,
+           updated_at=now() WHERE id=$1`,
+          [id, stage_id, isLost, lost_reason || null]
+        );
+        await q(`INSERT INTO activity (lead_id, kind, detail) VALUES ($1,'moved',$2)`, [id, `Moved to ${s[0]?.name || 'a stage'} (bulk)`]);
+        moved++;
+      }
+    }
+    if (Array.isArray(add_tags) && add_tags.length) {
+      await q(
+        `UPDATE leads SET tags = (SELECT array_agg(DISTINCT x) FROM unnest(tags || $2::text[]) x), updated_at=now()
+         WHERE id = ANY($1::int[])`,
+        [numIds, add_tags]
+      );
+    }
+    if (Array.isArray(remove_tags) && remove_tags.length) {
+      await q(
+        `UPDATE leads SET tags = COALESCE((SELECT array_agg(x) FROM unnest(tags) x WHERE NOT (x = ANY($2::text[]))), '{}'), updated_at=now()
+         WHERE id = ANY($1::int[])`,
+        [numIds, remove_tags]
+      );
+    }
+    if (campaign_name !== undefined) {
+      await q('UPDATE leads SET campaign_name=$2, updated_at=now() WHERE id = ANY($1::int[])', [numIds, campaign_name || null]);
+    }
+    res.json({ ok: true, updated: numIds.length, moved });
+  } catch (e) {
+    next(e);
+  }
+});
+
+leadsRouter.post('/bulk-delete', async (req, res, next) => {
+  try {
+    const { ids } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'No leads selected.' });
+    const numIds = ids.map(Number).filter(Number.isFinite);
+    const { rowCount } = await q('DELETE FROM leads WHERE id = ANY($1::int[])', [numIds]);
+    res.json({ ok: true, deleted: rowCount });
   } catch (e) {
     next(e);
   }
@@ -94,7 +480,38 @@ leadsRouter.get('/:id', async (req, res, next) => {
       'SELECT * FROM activity WHERE lead_id=$1 ORDER BY created_at DESC LIMIT 50',
       [req.params.id]
     );
-    res.json({ lead: rows[0], messages, remarks, activity });
+    const { rows: tasks } = await q(
+      'SELECT * FROM tasks WHERE lead_id=$1 ORDER BY done ASC, due_at ASC NULLS LAST, created_at DESC',
+      [req.params.id]
+    );
+    res.json({ lead: rows[0], messages, remarks, activity, tasks });
+  } catch (e) {
+    next(e);
+  }
+});
+
+leadsRouter.post('/:id/tasks', async (req, res, next) => {
+  try {
+    const { kind, title, due_at } = req.body || {};
+    if (!title || !String(title).trim()) return res.status(400).json({ error: 'Task needs a title.' });
+    const { rows } = await q(
+      'INSERT INTO tasks (lead_id, kind, title, due_at) VALUES ($1,$2,$3,$4) RETURNING *',
+      [req.params.id, kind || 'todo', String(title).trim(), due_at || null]
+    );
+    await q(`INSERT INTO activity (lead_id, kind, detail) VALUES ($1,'task_added',$2)`, [req.params.id, `Task added: ${String(title).trim()}`]);
+    res.json(rows[0]);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Records "I just reached out" — bumps last_contacted_at without sending anything. */
+leadsRouter.post('/:id/contacted', async (req, res, next) => {
+  try {
+    const { rows } = await q('UPDATE leads SET last_contacted_at = now(), updated_at = now() WHERE id=$1 RETURNING *', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Lead not found.' });
+    await q(`INSERT INTO activity (lead_id, kind, detail) VALUES ($1,'contacted','Marked as contacted')`, [req.params.id]);
+    res.json(rows[0]);
   } catch (e) {
     next(e);
   }
@@ -206,15 +623,15 @@ leadsRouter.post('/bulk', async (req, res, next) => {
 });
 
 /**
-* Looks up the target stage and, if it requires an appointment and/or followup
-* date, confirms each is present either in this request or already saved on
-* the lead. Returns { stage } when the move can proceed, or
-* { stage, blocked: message } when it can't — callers should turn `blocked`
-* into a 400 response.
+* Looks up the target stage and confirms the move is allowed: any required
+* appointment/followup date must be supplied in the request or already on the
+* lead, and a lead entering an `is_lost` stage must have a lost reason.
+* Returns { stage } when the move can proceed, or { stage, blocked: message,
+* needsLostReason? } when it can't — callers turn `blocked` into a 400.
 */
-async function checkStageDateRequirements(leadId, stageId, { appointment_date, followup_date }) {
+async function checkStageMoveRequirements(leadId, stageId, { appointment_date, followup_date, lost_reason }) {
   const { rows: stageRow } = await q(
-    'SELECT name, requires_appointment_date, requires_followup_date FROM stages WHERE id=$1',
+    'SELECT name, requires_appointment_date, requires_followup_date, is_won, is_lost FROM stages WHERE id=$1',
     [stageId]
   );
   const stage = stageRow[0];
@@ -222,27 +639,34 @@ async function checkStageDateRequirements(leadId, stageId, { appointment_date, f
 
   const needsAppointment = stage.requires_appointment_date && appointment_date === undefined;
   const needsFollowup = stage.requires_followup_date && followup_date === undefined;
-  if (!needsAppointment && !needsFollowup) return { stage };
+  const needsLostReason = stage.is_lost && !(lost_reason && String(lost_reason).trim());
+  if (!needsAppointment && !needsFollowup && !needsLostReason) return { stage };
 
-  const { rows: leadRow } = await q('SELECT appointment_date, followup_date FROM leads WHERE id=$1', [leadId]);
+  const { rows: leadRow } = await q('SELECT appointment_date, followup_date, lost_reason FROM leads WHERE id=$1', [leadId]);
   const missing = [];
   if (needsAppointment && !leadRow[0]?.appointment_date) missing.push('an appointment date');
   if (needsFollowup && !leadRow[0]?.followup_date) missing.push('a followup date');
+  const stillNeedsLostReason = needsLostReason && !(leadRow[0]?.lost_reason && String(leadRow[0].lost_reason).trim());
+  if (stillNeedsLostReason) missing.push('a lost reason');
   if (missing.length) {
-    return { stage, blocked: `${missing.join(' and ').replace(/^a/, 'A')} is required to move a lead into "${stage.name}".` };
+    return {
+      stage,
+      needsLostReason: stillNeedsLostReason || undefined,
+      blocked: `${missing.join(' and ').replace(/^a/, 'A')} is required to move a lead into "${stage.name}".`
+    };
   }
   return { stage };
 }
 
 leadsRouter.patch('/:id', async (req, res, next) => {
   try {
-    const { stage_id, full_name, email, city, value, campaign_name, custom_fields, appointment_date, followup_date } = req.body || {};
-    let stageName;
+    const { stage_id, full_name, email, city, value, campaign_name, custom_fields, appointment_date, followup_date, tags, lost_reason } = req.body || {};
+    let stageIsLost = false;
     if (stage_id !== undefined) {
-      const check = await checkStageDateRequirements(req.params.id, stage_id, { appointment_date, followup_date });
-      if (check.blocked) return res.status(400).json({ error: check.blocked });
-      stageName = check.stage?.name;
-      await q('INSERT INTO activity (lead_id, kind, detail) VALUES ($1, $2, $3)', [req.params.id, 'moved', `Moved to ${stageName || 'a stage'}`]);
+      const check = await checkStageMoveRequirements(req.params.id, stage_id, { appointment_date, followup_date, lost_reason });
+      if (check.blocked) return res.status(400).json({ error: check.blocked, needs_lost_reason: check.needsLostReason });
+      stageIsLost = !!check.stage?.is_lost;
+      await q('INSERT INTO activity (lead_id, kind, detail) VALUES ($1, $2, $3)', [req.params.id, 'moved', `Moved to ${check.stage?.name || 'a stage'}`]);
     }
     const { rows } = await q(
       `UPDATE leads SET
@@ -255,9 +679,22 @@ leadsRouter.patch('/:id', async (req, res, next) => {
       custom_fields=COALESCE($8,custom_fields),
       appointment_date=COALESCE($9,appointment_date),
       followup_date=COALESCE($10,followup_date),
+      tags=COALESCE($11::text[],tags),
+      stage_changed_at = CASE WHEN $12::int IS NOT NULL THEN now() ELSE stage_changed_at END,
+      lost_reason = CASE
+        WHEN $12::int IS NOT NULL AND $13 THEN COALESCE($14, lost_reason)
+        WHEN $12::int IS NOT NULL AND NOT $13 THEN NULL
+        WHEN $15 THEN $14
+        ELSE lost_reason END,
       updated_at=now()
       WHERE id=$1 RETURNING *`,
-      [req.params.id, stage_id, full_name, email, city, value, campaign_name, custom_fields !== undefined ? JSON.stringify(custom_fields) : undefined, appointment_date, followup_date]
+      [req.params.id, stage_id, full_name, email, city, value, campaign_name,
+        custom_fields !== undefined ? JSON.stringify(custom_fields) : undefined,
+        appointment_date, followup_date,
+        tags !== undefined ? tags : undefined,
+        stage_id ?? null, stageIsLost,
+        lost_reason === undefined ? null : (lost_reason || null),
+        lost_reason !== undefined]
     );
     res.json(rows[0]);
   } catch (e) {
@@ -271,15 +708,18 @@ leadsRouter.patch('/:id', async (req, res, next) => {
 // stage_id and does the same thing; this just matches what the client calls.
 leadsRouter.patch('/:id/move', async (req, res, next) => {
   try {
-    const { stage_id, appointment_date, followup_date } = req.body || {};
+    const { stage_id, appointment_date, followup_date, lost_reason } = req.body || {};
     if (stage_id === undefined) return res.status(400).json({ error: 'stage_id is required.' });
-    const check = await checkStageDateRequirements(req.params.id, stage_id, { appointment_date, followup_date });
-    if (check.blocked) return res.status(400).json({ error: check.blocked });
+    const check = await checkStageMoveRequirements(req.params.id, stage_id, { appointment_date, followup_date, lost_reason });
+    if (check.blocked) return res.status(400).json({ error: check.blocked, needs_lost_reason: check.needsLostReason });
     await q('INSERT INTO activity (lead_id, kind, detail) VALUES ($1, $2, $3)', [req.params.id, 'moved', `Moved to ${check.stage?.name || 'a stage'}`]);
     const { rows } = await q(
-      `UPDATE leads SET stage_id=$2, appointment_date=COALESCE($3,appointment_date),
-      followup_date=COALESCE($4,followup_date), updated_at=now() WHERE id=$1 RETURNING *`,
-      [req.params.id, stage_id, appointment_date, followup_date]
+      `UPDATE leads SET stage_id=$2, stage_changed_at=now(),
+      appointment_date=COALESCE($3,appointment_date),
+      followup_date=COALESCE($4,followup_date),
+      lost_reason = CASE WHEN $5 THEN COALESCE($6, lost_reason) ELSE NULL END,
+      updated_at=now() WHERE id=$1 RETURNING *`,
+      [req.params.id, stage_id, appointment_date, followup_date, !!check.stage?.is_lost, lost_reason || null]
     );
     if (!rows.length) return res.status(404).json({ error: 'Lead not found.' });
     res.json(rows[0]);
@@ -360,6 +800,7 @@ leadsRouter.post('/:id/messages', async (req, res, next) => {
       'INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, media_data, media_mime) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
       [req.params.id, 'out', 'whatsapp', body || null, waMessageId, mediaData || null, mediaMime || null]
     );
+    await q('UPDATE leads SET last_contacted_at = now(), updated_at = now() WHERE id = $1', [req.params.id]);
 
     res.json(rows[0]);
   } catch (e) {

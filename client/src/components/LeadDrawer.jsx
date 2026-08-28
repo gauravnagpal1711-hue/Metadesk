@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, when } from '../api.js';
+import { bucketOf, shortDateTime } from '../lib/dateBuckets.js';
+
+const TASK_KINDS = ['todo', 'call', 'meeting', 'whatsapp', 'email'];
 
 const URL_RE = /(https?:\/\/[^\s]+)/g;
 
@@ -48,8 +51,10 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
   const [customRows, setCustomRows] = useState([]);
-  const [pendingStage, setPendingStage] = useState(null); // { stageId, date }
+  const [pendingStage, setPendingStage] = useState(null); // { stageId, needsAppointment, needsFollowup, needsLostReason, ... }
   const [copiedPhone, setCopiedPhone] = useState(false);
+  const [tagDraft, setTagDraft] = useState('');
+  const [taskDraft, setTaskDraft] = useState({ kind: 'todo', title: '', due_at: '' });
   const endRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -78,7 +83,12 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   }, [onClose]);
 
   if (!data) return null;
-  const { lead, messages, remarks, activity } = data;
+  const { lead, messages, remarks, activity, tasks = [] } = data;
+  const stage = stages.find((s) => s.id === lead.stage_id);
+  const openTasks = tasks.filter((t) => !t.done);
+  const daysInStage = lead.stage_changed_at
+    ? Math.max(0, Math.round((Date.now() - new Date(lead.stage_changed_at).getTime()) / 86400000))
+    : null;
 
   const historyRows = [
     {
@@ -145,8 +155,9 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
     const target = stages.find((s) => s.id === stageId);
     const needsAppointment = !!target?.requires_appointment_date && !lead.appointment_date;
     const needsFollowup = !!target?.requires_followup_date && !lead.followup_date;
-    if (needsAppointment || needsFollowup) {
-      setPendingStage({ stageId, needsAppointment, needsFollowup, appointmentDate: '', followupDate: '' });
+    const needsLostReason = !!target?.is_lost && !lead.lost_reason;
+    if (needsAppointment || needsFollowup || needsLostReason) {
+      setPendingStage({ stageId, needsAppointment, needsFollowup, needsLostReason, appointmentDate: '', followupDate: '', lostReason: '' });
       return;
     }
     setError('');
@@ -159,16 +170,70 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   }
 
   async function confirmPendingMove() {
-    const { stageId, needsAppointment, needsFollowup, appointmentDate, followupDate } = pendingStage || {};
+    const { stageId, needsAppointment, needsFollowup, needsLostReason, appointmentDate, followupDate, lostReason } = pendingStage || {};
     if (needsAppointment && !appointmentDate) return;
     if (needsFollowup && !followupDate) return;
+    if (needsLostReason && !lostReason.trim()) return;
     setError('');
     try {
       const body = { stage_id: stageId };
       if (needsAppointment) body.appointment_date = new Date(appointmentDate).toISOString();
       if (needsFollowup) body.followup_date = new Date(followupDate).toISOString();
+      if (needsLostReason) body.lost_reason = lostReason.trim();
       await api.patch(`/leads/${leadId}/move`, body);
       setPendingStage(null);
+      await load();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function logContact() {
+    setError('');
+    try {
+      await api.post(`/leads/${leadId}/contacted`);
+      await load();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function saveTags(tags) {
+    await api.patch(`/leads/${leadId}`, { tags });
+    await load();
+  }
+  function addTag() {
+    const t = tagDraft.trim();
+    if (!t || (lead.tags || []).includes(t)) { setTagDraft(''); return; }
+    saveTags([...(lead.tags || []), t]);
+    setTagDraft('');
+  }
+
+  async function addTask() {
+    if (!taskDraft.title.trim()) return;
+    try {
+      await api.post(`/leads/${leadId}/tasks`, {
+        kind: taskDraft.kind,
+        title: taskDraft.title.trim(),
+        due_at: taskDraft.due_at ? new Date(taskDraft.due_at).toISOString() : null
+      });
+      setTaskDraft({ kind: 'todo', title: '', due_at: '' });
+      await load();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+  async function toggleTask(task) {
+    try {
+      await api.patch(`/leads/tasks/${task.id}`, { done: !task.done });
+      await load();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+  async function deleteTask(task) {
+    try {
+      await api.del(`/leads/tasks/${task.id}`);
       await load();
     } catch (e) {
       setError(e.message);
@@ -283,11 +348,28 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
                   />
                 </div>
               )}
+              {pendingStage.needsLostReason && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="mono-label" style={{ flex: '0 0 auto' }}>Lost reason</span>
+                  <input
+                    className="input"
+                    placeholder="Why was this lost?"
+                    value={pendingStage.lostReason}
+                    onChange={(e) => setPendingStage((p) => ({ ...p, lostReason: e.target.value }))}
+                    style={{ flex: 1 }}
+                    autoFocus={!pendingStage.needsAppointment && !pendingStage.needsFollowup}
+                  />
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button
                   className="btn primary sm"
                   onClick={confirmPendingMove}
-                  disabled={(pendingStage.needsAppointment && !pendingStage.appointmentDate) || (pendingStage.needsFollowup && !pendingStage.followupDate)}
+                  disabled={
+                    (pendingStage.needsAppointment && !pendingStage.appointmentDate) ||
+                    (pendingStage.needsFollowup && !pendingStage.followupDate) ||
+                    (pendingStage.needsLostReason && !pendingStage.lostReason.trim())
+                  }
                 >
                   Confirm
                 </button>
@@ -299,16 +381,19 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
 
         <div className="drawer-info">
           <div className="cell">
-            <div className="k">City</div>
-            <div className="v">{lead.city || '—'}</div>
-          </div>
-          <div className="cell">
             <div className="k">Source</div>
             <div className="v">{lead.campaign_name || lead.source || '—'}</div>
           </div>
           <div className="cell">
-            <div className="k">Received</div>
-            <div className="v">{when(lead.created_at)}</div>
+            <div className="k">In stage</div>
+            <div className="v">{daysInStage == null ? '—' : `${daysInStage}d`}</div>
+          </div>
+          <div className="cell">
+            <div className="k">Last contacted</div>
+            <div className="v" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {lead.last_contacted_at ? when(lead.last_contacted_at) : 'never'}
+              <button className="btn ghost sm" onClick={logContact} title="Mark contacted now">Log</button>
+            </div>
           </div>
         </div>
 
@@ -316,6 +401,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
           {[
             ['chat', `Conversation${messages.length ? ` (${messages.length})` : ''}`],
             ['notes', `Remarks${remarks.length ? ` (${remarks.length})` : ''}`],
+            ['tasks', `Tasks${openTasks.length ? ` (${openTasks.length})` : ''}`],
             ['history', `History${historyRows.length ? ` (${historyRows.length})` : ''}`],
             ['details', 'Details']
           ].map(([id, label]) => (
@@ -362,6 +448,56 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
                 <div className="remark" key={r.id}>
                   <div>{r.body}</div>
                   <div className="t">{r.author === 'upload' ? 'UPLOADED' : new Date(r.created_at).toLocaleString()}</div>
+                </div>
+              ))}
+            </>
+          )}
+
+          {view === 'tasks' && (
+            <>
+              <div className="field" style={{ display: 'grid', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <select
+                    className="select"
+                    value={taskDraft.kind}
+                    onChange={(e) => setTaskDraft((t) => ({ ...t, kind: e.target.value }))}
+                    style={{ flex: '0 0 110px' }}
+                  >
+                    {TASK_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+                  </select>
+                  <input
+                    className="input"
+                    placeholder="Call back about the quote"
+                    value={taskDraft.title}
+                    onChange={(e) => setTaskDraft((t) => ({ ...t, title: e.target.value }))}
+                    onKeyDown={(e) => e.key === 'Enter' && addTask()}
+                    style={{ flex: 1 }}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    type="datetime-local"
+                    className="input"
+                    value={taskDraft.due_at}
+                    onChange={(e) => setTaskDraft((t) => ({ ...t, due_at: e.target.value }))}
+                    style={{ flex: 1 }}
+                  />
+                  <button className="btn primary" onClick={addTask} disabled={!taskDraft.title.trim()}>Add task</button>
+                </div>
+              </div>
+              {tasks.length === 0 && <div className="empty"><h3>No tasks</h3>Add a call, meeting or to-do above.</div>}
+              {tasks.map((t) => (
+                <div className="remark" key={t.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                  <input type="checkbox" checked={!!t.done} onChange={() => toggleTask(t)} style={{ marginTop: 3 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ textDecoration: t.done ? 'line-through' : 'none', color: t.done ? 'var(--muted-2)' : 'inherit' }}>
+                      <span className="tag off" style={{ marginRight: 6 }}>{t.kind}</span>{t.title}
+                    </div>
+                    <div className="t">
+                      {t.due_at ? <span className={`date-chip ${t.done ? 'none' : bucketOf(t.due_at)}`}>{shortDateTime(t.due_at)}</span> : 'no due date'}
+                    </div>
+                  </div>
+                  <button className="btn ghost sm danger" onClick={() => deleteTask(t)} aria-label="Delete task">×</button>
                 </div>
               ))}
             </>
@@ -433,6 +569,43 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
                   onBlur={(e) => saveFollowupDate(e.target.value)}
                 />
               </div>
+
+              <div className="field">
+                <label>Tags</label>
+                <div className="lead-tags" style={{ marginBottom: 6 }}>
+                  {(lead.tags || []).map((t) => (
+                    <span key={t} className="tag off">
+                      {t}
+                      <button
+                        onClick={() => saveTags((lead.tags || []).filter((x) => x !== t))}
+                        style={{ marginLeft: 4, border: 0, background: 'transparent', cursor: 'pointer', color: 'inherit' }}
+                        aria-label={`Remove ${t}`}
+                      >×</button>
+                    </span>
+                  ))}
+                  {(lead.tags || []).length === 0 && <span style={{ color: 'var(--muted-2)', fontSize: 12 }}>No tags</span>}
+                </div>
+                <input
+                  className="input"
+                  placeholder="Add a tag + Enter"
+                  value={tagDraft}
+                  onChange={(e) => setTagDraft(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && addTag()}
+                />
+              </div>
+
+              {(lead.lost_reason || stage?.is_lost) && (
+                <div className="field">
+                  <label htmlFor="f-lost_reason">Lost reason</label>
+                  <input
+                    id="f-lost_reason"
+                    className="input"
+                    defaultValue={lead.lost_reason ?? ''}
+                    key={lead.lost_reason ?? ''}
+                    onBlur={(e) => saveField('lost_reason', e.target.value)}
+                  />
+                </div>
+              )}
 
               {lead.fields && Object.keys(lead.fields).length > 0 && (
                 <>

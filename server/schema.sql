@@ -73,9 +73,15 @@ updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS custom_fields JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS appointment_date TIMESTAMPTZ;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS followup_date TIMESTAMPTZ;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_contacted_at TIMESTAMPTZ;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS lost_reason TEXT;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS stage_changed_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
 CREATE INDEX IF NOT EXISTS leads_stage_idx ON leads(stage_id);
 CREATE INDEX IF NOT EXISTS leads_phone_idx ON leads(phone);
+CREATE INDEX IF NOT EXISTS leads_followup_idx ON leads(followup_date);
+CREATE INDEX IF NOT EXISTS leads_tags_idx ON leads USING GIN (tags);
 
 CREATE TABLE IF NOT EXISTS messages (
 id SERIAL PRIMARY KEY,
@@ -128,3 +134,26 @@ created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS pending_messages_phone_idx ON pending_messages(phone);
+
+CREATE TABLE IF NOT EXISTS tasks (
+id SERIAL PRIMARY KEY,
+lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+kind TEXT NOT NULL DEFAULT 'todo', -- todo | call | meeting | whatsapp | email
+title TEXT NOT NULL,
+due_at TIMESTAMPTZ,
+done BOOLEAN NOT NULL DEFAULT false,
+done_at TIMESTAMPTZ,
+created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS tasks_due_idx ON tasks(done, due_at);
+CREATE INDEX IF NOT EXISTS tasks_lead_idx ON tasks(lead_id);
+
+CREATE TABLE IF NOT EXISTS saved_views (
+id SERIAL PRIMARY KEY,
+name TEXT NOT NULL,
+filters JSONB NOT NULL DEFAULT '{}'::jsonb,
+layout TEXT NOT NULL DEFAULT 'board', -- board | table
+position INTEGER NOT NULL DEFAULT 0,
+created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

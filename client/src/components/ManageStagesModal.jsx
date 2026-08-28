@@ -53,6 +53,15 @@ export default function ManageStagesModal({ stages, onClose, onChanged }) {
     }
   }
 
+  async function toggleFlag(stage, patch) {
+    try {
+      await api.patch(`/leads/stages/${stage.id}`, patch);
+      await refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
   async function move(index, dir) {
     const target = index + dir;
     if (target < 0 || target >= rows.length) return;
@@ -142,9 +151,28 @@ export default function ManageStagesModal({ stages, onClose, onChanged }) {
                   />
                   ⏰
                 </label>
-                {(stage.is_won || stage.is_lost) && (
-                  <span className="tag off">{stage.is_won ? 'won' : 'lost'}</span>
-                )}
+                <label
+                  title="Mark this as a WON stage (counts as a closed win in Insights)"
+                  style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: 'var(--good)', flex: '0 0 auto', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!stage.is_won}
+                    onChange={(e) => toggleFlag(stage, { is_won: e.target.checked, is_lost: e.target.checked ? false : stage.is_lost })}
+                  />
+                  W
+                </label>
+                <label
+                  title="Mark this as a LOST stage (prompts for a lost reason; counts against win rate)"
+                  style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: 'var(--danger)', flex: '0 0 auto', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!stage.is_lost}
+                    onChange={(e) => toggleFlag(stage, { is_lost: e.target.checked, is_won: e.target.checked ? false : stage.is_won })}
+                  />
+                  L
+                </label>
                 <button className="btn ghost sm" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Move up">↑</button>
                 <button className="btn ghost sm" onClick={() => move(i, 1)} disabled={i === rows.length - 1} aria-label="Move down">↓</button>
                 <button className="btn ghost sm danger" onClick={() => remove(stage)} aria-label="Delete stage">Delete</button>

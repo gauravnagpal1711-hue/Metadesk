@@ -4,6 +4,7 @@ import Login from './components/Login.jsx';
 import Creative from './tabs/Creative.jsx';
 import Campaigns from './tabs/Campaigns.jsx';
 import Leads from './tabs/Leads.jsx';
+import Insights from './tabs/Insights.jsx';
 import Connect from './tabs/Connect.jsx';
 import Facebook from './tabs/Facebook.jsx';
 import ReachUs from './tabs/ReachUs.jsx';
@@ -12,6 +13,7 @@ const TABS = [
   { id: 'creative', label: 'Build Your Brand', title: 'Build Your Brand', sub: 'Brief, image prompts, and creative gallery' },
   { id: 'campaigns', label: 'Campaigns', title: 'Campaigns', sub: 'Live from Meta Marketing API · inline budget edit' },
   { id: 'leads', label: 'Leads', title: 'Leads', sub: 'Drag leads through the funnel · click for detail' },
+  { id: 'insights', label: 'Insights', title: 'Insights', sub: 'Pipeline conversion, velocity and lead sources' },
   { id: 'facebook', label: 'Facebook', title: 'Facebook', sub: 'OAuth connection, account and lead form mapping' },
   { id: 'connect', label: 'WhatsApp', title: 'WhatsApp', sub: 'Pair a device or point the Cloud API webhook here' },
   { id: 'reachus', label: 'Reach Us', title: 'Reach Us', sub: 'Send a query straight to WhatsApp' }
@@ -198,6 +200,7 @@ export default function App() {
           {tab === 'leads' && (
             <Leads query={query} onQueryChange={setQuery} onBoardLoaded={onBoardLoaded} syncSignal={syncSignal} campaigns={campaigns} />
           )}
+          {tab === 'insights' && <Insights campaigns={campaigns} syncSignal={syncSignal} />}
           {tab === 'facebook' && <Facebook onConnectionChange={refreshConnections} />}
           {tab === 'connect' && <Connect onConnectionChange={refreshConnections} />}
           {tab === 'reachus' && <ReachUs />}

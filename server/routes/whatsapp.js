@@ -49,6 +49,8 @@ if (fromMe) {
     VALUES ($1,'out','whatsapp',$2,$3,$4,$5,$6)`,
     [lead.id, body, wa_message_id, media_data || null, media_mime || null, ts || new Date()]
   );
+  await q('UPDATE leads SET last_contacted_at = now(), updated_at = now() WHERE id = $1', [lead.id]);
+  console.log(`[WhatsApp] Recorded phone-sent reply for lead ${lead.id} (${phone})`);
   return lead;
 }
 
