@@ -123,7 +123,7 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
         <div className="mono-label" style={{ textTransform: 'uppercase' }}>
           {leads.length} LEADS · {wonCount} WON · {stages.length} STAGES
         </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+        <div className="board-bar-actions">
           <SavedViews
             currentFilters={filters}
             currentLayout={layout}
