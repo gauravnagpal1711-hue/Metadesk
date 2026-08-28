@@ -115,11 +115,12 @@ export async function listCampaigns() {
   });
 }
 
-/** Ad sets inside one campaign, so budgets can be edited at the right level. */
+/** Ad sets inside one campaign — budgets, schedule and targeting, so the edit
+ *  panel can pre-fill with what the campaign already has. */
 export async function listAdSets(campaignId) {
   const data = await graph(`${campaignId}/adsets`, {
     params: {
-      fields: 'id,name,status,daily_budget,lifetime_budget,optimization_goal,targeting',
+      fields: 'id,name,status,daily_budget,lifetime_budget,optimization_goal,billing_event,start_time,end_time,promoted_object,targeting',
       limit: 100
     }
   });
