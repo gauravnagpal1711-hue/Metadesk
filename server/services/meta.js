@@ -149,10 +149,93 @@ export async function listLeadForms(pageId) {
   const id = pageId || connection.pageId;
   if (!id) throw new Error('No Facebook page selected. Pick one on the Connect tab.');
   const data = await graph(`${id}/leadgen_forms`, {
-    params: { fields: 'id,name,status,leads_count', limit: 200 },
+    params: { fields: 'id,name,status,leads_count,questions', limit: 200 },
     token: connection.pageToken || undefined
   });
-  return data.data || [];
+  return (data.data || []).map((f) => ({
+    id: f.id,
+    name: f.name,
+    status: f.status,
+    leads_count: f.leads_count,
+    fields: (f.questions || []).map((q) => q.type)
+  }));
+}
+
+/* ---------- helpers for the in-app campaign builder (all reads except createLeadForm) ---------- */
+
+/** City / region type-ahead. Returns Meta geo keys the ad-set targeting needs. */
+export async function searchGeo(qStr) {
+  if (!qStr || !qStr.trim()) return [];
+  const data = await graph('search', {
+    params: {
+      type: 'adgeolocation',
+      q: qStr.trim(),
+      location_types: JSON.stringify(['city', 'region']),
+      limit: 8
+    }
+  });
+  return (data.data || []).map((g) => ({
+    key: g.key,
+    name: g.name,
+    type: g.type,
+    region: g.region || null,
+    country_code: g.country_code || null
+  }));
+}
+
+/** Interest type-ahead for the Advanced targeting section. */
+export async function searchInterests(qStr) {
+  if (!qStr || !qStr.trim()) return [];
+  const data = await graph('search', { params: { type: 'adinterest', q: qStr.trim(), limit: 10 } });
+  return (data.data || []).map((i) => ({
+    id: i.id,
+    name: i.name,
+    audience_size: i.audience_size_lower_bound || i.audience_size || null,
+    path: i.path || []
+  }));
+}
+
+/** Best-effort resolve the WhatsApp number leads should message. */
+export async function resolveWhatsappNumber() {
+  const pageId = connection.pageId;
+  if (pageId) {
+    try {
+      const p = await graph(`${pageId}`, {
+        params: { fields: 'connected_whatsapp_number,whatsapp_number' },
+        token: connection.pageToken || undefined
+      });
+      const n = p.connected_whatsapp_number || p.whatsapp_number;
+      if (n) return { number: String(n).replace(/\D/g, ''), source: 'page' };
+    } catch {
+      /* page has no WA field / no permission — fall through */
+    }
+  }
+  if (process.env.WA_DISPLAY_NUMBER) {
+    return { number: String(process.env.WA_DISPLAY_NUMBER).replace(/\D/g, ''), source: 'env' };
+  }
+  try {
+    const { webStatus } = await import('./whatsappWeb.js');
+    const me = webStatus()?.me;
+    if (me) return { number: String(me).replace(/\D/g, ''), source: 'whatsapp-web' };
+  } catch {
+    /* Baileys not running */
+  }
+  return { number: null, source: null };
+}
+
+/** Page info the form flow needs: id, name, and whether lead terms are accepted. */
+export async function getPageInfo() {
+  const pageId = connection.pageId;
+  if (!pageId) return { page_id: null, page_name: null, leadgen_tos_accepted: null };
+  try {
+    const p = await graph(`${pageId}`, {
+      params: { fields: 'id,name,leadgen_tos_accepted' },
+      token: connection.pageToken || undefined
+    });
+    return { page_id: p.id, page_name: p.name, leadgen_tos_accepted: !!p.leadgen_tos_accepted };
+  } catch {
+    return { page_id: pageId, page_name: connection.name || null, leadgen_tos_accepted: null };
+  }
 }
 
 /** Raw leads for one form, newest first. */

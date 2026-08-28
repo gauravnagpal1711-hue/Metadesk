@@ -90,19 +90,37 @@ Note that a ChatGPT Plus or Go subscription does **not** include API access — 
 
 ## Creating campaigns
 
-The app does **not** write to Meta. It assembles a **campaign brief**; Claude Code
-creates the real campaign from that brief using its Meta Ads MCP tools, all in
-`PAUSED` status, then records the Meta IDs back on the brief.
+The app **never writes to Meta** — not even reads that change anything. It shows
+the shopkeeper plain-language choices, resolves the Meta bits behind the scenes
+(city → geo key, "WhatsApp" → your number, interests → interest IDs) via
+**read-only** `/api/meta/*` lookups, and saves a **campaign brief**. Claude Code's
+Meta Ads MCP connector creates the real campaign from that brief, all `PAUSED`,
+then records the Meta IDs back.
+
+Everything the shopkeeper sees is one short question per step; Meta's real knobs
+(age, gender, interests, optimization goal, max cost-per-result) live under an
+**"Advanced"** toggle, pre-filled so they are never required.
 
 **Flow**
 
-1. **Build Your Brand → gallery card → "Set up for campaign".** Give the creative a
-   name, a destination (WhatsApp number / Instant form ID / Website URL) and a
-   button, then **Approve** it. It now shows `✓ campaign-ready`.
-2. **Campaigns → "Create campaign".** Pick that creative, set a daily budget
-   (min ₹100), audience presets (cities, radius, age, gender) and a schedule.
-   Save — this writes a row to `campaign_briefs` (`status: draft` → `ready`).
-3. Tell Claude Code: **`create campaign brief #<id>`**.
+1. **Build Your Brand → gallery card → "Set up for campaign".** Name it, choose
+   what happens on tap — *Message you on WhatsApp* (number auto-detected, no
+   typing), *Fill your form* (pick an existing Page form), or *Visit your website*
+   (URL) — then **Approve**. Shows `✓ campaign-ready`.
+2. **Campaigns → "Create campaign".** Pick the creative, set ₹/day (min ₹100),
+   type your cities (auto-resolved), pick a schedule. Advanced holds age / gender
+   / interests / tuning. Save → `campaign_briefs` row (`draft` → `ready`).
+3. Tell Claude Code: **`create campaign brief #<id>`** — it runs with no
+   follow-up questions because the brief already carries resolved geo keys, the
+   WhatsApp number / form id, and any interest IDs.
+
+**Read-only Meta lookups** (`server/routes/metaTargeting.js`): `GET /api/meta/geo`,
+`/interests`, `/whatsapp-number`, `/page`, `/lead-forms`.
+
+**Instant Forms:** creating a new lead form has no Meta Ads MCP tool and the app
+does no Meta writes, so the form picker only lists forms that already exist on the
+Page. If there are none, use a WhatsApp creative (needs no form) or create one
+form once in Meta.
 
 **What Claude Code does** (no code in this repo — MCP tools run in the session):
 
@@ -111,7 +129,7 @@ creates the real campaign from that brief using its Meta Ads MCP tools, all in
 | Resolve account / page | `ads_get_ad_accounts`, `ads_get_ad_account_pages` | |
 | Upload the image | `ads_creative_upload_local_image` | creative `image_data` (a data URL from `GET /api/campaign-briefs/:id`) is written to a temp file first → `image_hash` |
 | Campaign | `ads_create_campaign` | `objective=OUTCOME_LEADS`, `status=PAUSED`, `special_ad_categories=[]` |
-| Ad set | `ads_create_ad_set` | `status=PAUSED`, `daily_budget` in paise; WhatsApp → `optimization_goal=CONVERSATIONS`, `destination_type=WHATSAPP`, `promoted_object={page_id}`; Instant form → `optimization_goal=LEAD_GENERATION`, `promoted_object={page_id, lead_gen_form_id}`; targeting from the brief's `audience` |
+| Ad set | `ads_create_ad_set` | `status=PAUSED`, `daily_budget` in paise; WhatsApp → `optimization_goal=CONVERSATIONS`, `destination_type=WHATSAPP`, `promoted_object={page_id}`; Instant form → `optimization_goal=LEAD_GENERATION`, `promoted_object={page_id, lead_gen_form_id}`. Targeting from `audience`: `geo_locations.cities:[{key, radius:<radius_km>, distance_unit:'kilometer'}]`, `age_min/max`, `genders` (1=male, 2=female; omit for all), `flexible_spec:[{interests:[{id}]}]` when interests set. `audience.advanced.optimization_goal` / `bid_cap_rupees` override the defaults. |
 | Ad creative | `ads_create_creative` | `image_hash` + primary text/headline + `call_to_action {type, value}` (WhatsApp deep link / `lead_gen_form_id` / `link_url`) |
 | Ad | `ads_create_ad` | `status=PAUSED`, ad set + creative |
 | Preview | `ads_get_ad_preview` | sanity-check the render |
