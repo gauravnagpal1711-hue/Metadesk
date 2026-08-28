@@ -1,10 +1,29 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, money, when } from '../api.js';
+import CreateCampaignModal from '../components/CreateCampaignModal.jsx';
 
 export default function Campaigns({ rows, setRows, conn, onSynced }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [drafts, setDrafts] = useState({});
+  const [creatives, setCreatives] = useState([]);
+  const [briefs, setBriefs] = useState([]);
+  const [createOpen, setCreateOpen] = useState(false);
+
+  useEffect(() => {
+    api.get('/creatives').then(setCreatives).catch(() => {});
+    api.get('/campaign-briefs').then(setBriefs).catch(() => {});
+  }, []);
+
+  async function deleteBrief(id) {
+    if (!window.confirm('Delete this campaign brief?')) return;
+    try {
+      await api.del(`/campaign-briefs/${id}`);
+      setBriefs((b) => b.filter((x) => x.id !== id));
+    } catch (e) {
+      setError(e.message);
+    }
+  }
 
   async function sync() {
     setBusy(true);
@@ -56,6 +75,7 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
         <button className="btn primary" onClick={sync} disabled={busy || !conn.connected}>
           {busy ? 'Syncing…' : 'Sync from Meta'}
         </button>
+        <button className="btn" onClick={() => setCreateOpen(true)}>Create campaign</button>
         {rows[0]?.synced_at && <span className="sub" style={{ color: 'var(--muted)' }}>Updated {when(rows[0].synced_at)}</span>}
       </div>
 
@@ -119,6 +139,51 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
             {rows[0]?.synced_at && <span style={{ marginLeft: 'auto' }}>{when(rows[0].synced_at)}</span>}
           </div>
         </div>
+      )}
+
+      {briefs.length > 0 && (
+        <div style={{ marginTop: 28 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <h2 style={{ margin: 0, fontSize: 16 }}>Campaign briefs</h2>
+            <span className="mono-label">{briefs.length}</span>
+          </div>
+          <div className="scroll-x">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Name</th><th>Creative</th><th style={{ textAlign: 'right' }}>Daily ₹</th><th>Status</th><th>Next step</th><th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {briefs.map((b) => (
+                  <tr key={b.id}>
+                    <td><div className="name">{b.name}</div><div className="num" style={{ fontSize: 10.5, color: 'var(--muted-2)' }}>brief #{b.id}</div></td>
+                    <td>{b.creative_label || b.creative_headline || (b.creative_id ? `#${b.creative_id}` : '—')}</td>
+                    <td className="num" style={{ textAlign: 'right' }}>{b.daily_budget ? money(b.daily_budget) : '—'}</td>
+                    <td><span className={`tag ${b.status === 'created' || b.status === 'live' ? 'good' : b.status === 'ready' ? 'warn' : 'off'}`}>{b.status}</span></td>
+                    <td style={{ fontSize: 12.5 }}>
+                      {b.status === 'ready' && <>Tell Claude: <code>create campaign brief #{b.id}</code></>}
+                      {b.status === 'draft' && 'Finish the brief (needs an approved creative + budget)'}
+                      {b.status === 'created' && <>PAUSED on Meta · <span className="num">{b.meta_campaign_id}</span> · say <code>turn on brief #{b.id}</code></>}
+                      {b.status === 'live' && <>Live · <span className="num">{b.meta_campaign_id}</span></>}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <button className="btn sm ghost danger" onClick={() => deleteBrief(b.id)}>Delete</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {createOpen && (
+        <CreateCampaignModal
+          creatives={creatives}
+          onClose={() => setCreateOpen(false)}
+          onSaved={(saved) => { setBriefs((b) => [saved, ...b]); setCreateOpen(false); }}
+        />
       )}
     </>
   );

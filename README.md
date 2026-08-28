@@ -88,10 +88,50 @@ Add `OPENAI_API_KEY` later and a **Generate here instead** button appears, remov
 
 Note that a ChatGPT Plus or Go subscription does **not** include API access — the API is billed separately at platform.openai.com.
 
+## Creating campaigns
+
+The app does **not** write to Meta. It assembles a **campaign brief**; Claude Code
+creates the real campaign from that brief using its Meta Ads MCP tools, all in
+`PAUSED` status, then records the Meta IDs back on the brief.
+
+**Flow**
+
+1. **Build Your Brand → gallery card → "Set up for campaign".** Give the creative a
+   name, a destination (WhatsApp number / Instant form ID / Website URL) and a
+   button, then **Approve** it. It now shows `✓ campaign-ready`.
+2. **Campaigns → "Create campaign".** Pick that creative, set a daily budget
+   (min ₹100), audience presets (cities, radius, age, gender) and a schedule.
+   Save — this writes a row to `campaign_briefs` (`status: draft` → `ready`).
+3. Tell Claude Code: **`create campaign brief #<id>`**.
+
+**What Claude Code does** (no code in this repo — MCP tools run in the session):
+
+| Step | Meta Ads MCP tool | Notes |
+|---|---|---|
+| Resolve account / page | `ads_get_ad_accounts`, `ads_get_ad_account_pages` | |
+| Upload the image | `ads_creative_upload_local_image` | creative `image_data` (a data URL from `GET /api/campaign-briefs/:id`) is written to a temp file first → `image_hash` |
+| Campaign | `ads_create_campaign` | `objective=OUTCOME_LEADS`, `status=PAUSED`, `special_ad_categories=[]` |
+| Ad set | `ads_create_ad_set` | `status=PAUSED`, `daily_budget` in paise; WhatsApp → `optimization_goal=CONVERSATIONS`, `destination_type=WHATSAPP`, `promoted_object={page_id}`; Instant form → `optimization_goal=LEAD_GENERATION`, `promoted_object={page_id, lead_gen_form_id}`; targeting from the brief's `audience` |
+| Ad creative | `ads_create_creative` | `image_hash` + primary text/headline + `call_to_action {type, value}` (WhatsApp deep link / `lead_gen_form_id` / `link_url`) |
+| Ad | `ads_create_ad` | `status=PAUSED`, ad set + creative |
+| Preview | `ads_get_ad_preview` | sanity-check the render |
+| Record | `PATCH /api/campaign-briefs/:id` | writes `meta_*` ids, `status=created` |
+
+`POST /api/campaigns/sync` then pulls the new (paused) campaign into the table
+with no extra code.
+
+**Turning it on** is a separate explicit request — `turn on brief #<id>` →
+`ads_activate_entity` on the campaign + ad set, then `PATCH … status=live`.
+
+**Safety / testing:** the FB OAuth token already carries `ads_management`.
+Everything is created `PAUSED`; verify with `ads_get_ad_preview`; **never run the
+turn-on step while testing**; delete test campaigns afterward (Ads Manager or an
+`ads_*` delete tool). This account has live spend — see the "never mutate
+production ads" rule.
+
 ## Where to extend it next
 
 - **Video creatives.** The `creatives` table already has a `kind` and `video_url` column. Wire a video model into `server/services/ai.js` and post to `/api/creatives/video`.
-- **Publishing to Meta.** Right now creatives are downloaded and uploaded by hand. The next step is `POST /act_<id>/adimages` then `/ads` to push an approved creative live.
 - **Automations.** Add a rule table and fire a WhatsApp template the moment a lead lands in a given stage.
 
 ## Layout

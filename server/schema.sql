@@ -11,8 +11,19 @@ provider TEXT,
 image_data TEXT, -- base64 data URL
 video_url TEXT,
 status TEXT NOT NULL DEFAULT 'draft', -- draft | approved | used
+label TEXT,
+cta_type TEXT,             -- Meta CTA enum, e.g. WHATSAPP_MESSAGE | SIGN_UP | LEARN_MORE
+destination_type TEXT,     -- whatsapp | lead_form | website
+destination_value TEXT,    -- WhatsApp phone (digits) | lead-form id | URL
+link_url TEXT,             -- display/click URL for a website destination
 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE creatives ADD COLUMN IF NOT EXISTS label TEXT;
+ALTER TABLE creatives ADD COLUMN IF NOT EXISTS cta_type TEXT;
+ALTER TABLE creatives ADD COLUMN IF NOT EXISTS destination_type TEXT;
+ALTER TABLE creatives ADD COLUMN IF NOT EXISTS destination_value TEXT;
+ALTER TABLE creatives ADD COLUMN IF NOT EXISTS link_url TEXT;
 
 CREATE TABLE IF NOT EXISTS campaigns (
 id TEXT PRIMARY KEY, -- Meta campaign id
@@ -156,4 +167,26 @@ filters JSONB NOT NULL DEFAULT '{}'::jsonb,
 layout TEXT NOT NULL DEFAULT 'board', -- board | table
 position INTEGER NOT NULL DEFAULT 0,
 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Campaign briefs: the app assembles these; Claude Code creates the real Meta
+-- campaign from a brief (via MCP) and writes the meta_* ids back here.
+CREATE TABLE IF NOT EXISTS campaign_briefs (
+id SERIAL PRIMARY KEY,
+name TEXT NOT NULL,
+objective TEXT NOT NULL DEFAULT 'OUTCOME_LEADS',
+creative_id INTEGER REFERENCES creatives(id) ON DELETE SET NULL,
+daily_budget NUMERIC,
+audience JSONB NOT NULL DEFAULT '{}'::jsonb, -- { cities:[], radius_km, age_min, age_max, genders:[] }
+start_at TIMESTAMPTZ,
+end_at TIMESTAMPTZ,
+status TEXT NOT NULL DEFAULT 'draft', -- draft | ready | created | live | archived
+meta_campaign_id TEXT,
+meta_adset_id TEXT,
+meta_creative_id TEXT,
+meta_ad_id TEXT,
+meta_image_hash TEXT,
+notes TEXT,
+created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

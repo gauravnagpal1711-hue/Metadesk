@@ -63,15 +63,20 @@ creativesRouter.post('/upload', async (req, res, next) => {
 
 creativesRouter.patch('/:id', async (req, res, next) => {
   try {
-    const { status, headline, primary_text, cta } = req.body || {};
+    const { status, headline, primary_text, cta, label, cta_type, destination_type, destination_value, link_url } = req.body || {};
     const { rows } = await q(
       `UPDATE creatives SET
          status = COALESCE($2, status),
          headline = COALESCE($3, headline),
          primary_text = COALESCE($4, primary_text),
-         cta = COALESCE($5, cta)
+         cta = COALESCE($5, cta),
+         label = COALESCE($6, label),
+         cta_type = COALESCE($7, cta_type),
+         destination_type = COALESCE($8, destination_type),
+         destination_value = COALESCE($9, destination_value),
+         link_url = COALESCE($10, link_url)
        WHERE id = $1 RETURNING *`,
-      [req.params.id, status, headline, primary_text, cta]
+      [req.params.id, status, headline, primary_text, cta, label, cta_type, destination_type, destination_value, link_url]
     );
     if (!rows.length) return res.status(404).json({ error: 'That creative no longer exists.' });
     res.json(rows[0]);

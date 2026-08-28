@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import CreativeCampaignFields from '../components/CreativeCampaignFields.jsx';
+
+/** A creative can go straight into a campaign once it's approved and has a destination. */
+export function isCampaignReady(c) {
+  return c.status === 'approved' && !!c.destination_type && !!c.destination_value;
+}
 
 const SIZES = [
   { v: '1024x1024', l: 'Square 1:1 — feed', ratio: 'square 1:1' },
@@ -113,6 +119,10 @@ export default function Creative() {
   async function approve(id) {
     const updated = await api.patch(`/creatives/${id}`, { status: 'approved' });
     setGallery((g) => g.map((c) => (c.id === id ? updated : c)));
+  }
+
+  function patchCreative(updated) {
+    setGallery((g) => g.map((c) => (c.id === updated.id ? updated : c)));
   }
 
   async function remove(id) {
@@ -276,16 +286,18 @@ export default function Creative() {
             <div className="shot" key={c.id}>
               {c.image_data && <img src={c.image_data} alt={c.headline || 'Creative'} />}
               <div className="body">
-                <div className="hl">{c.headline || 'Untitled'}</div>
+                <div className="hl">{c.label || c.headline || 'Untitled'}</div>
                 <div className="pt">{c.primary_text || c.prompt}</div>
-                <div style={{ marginTop: 8, display: 'flex', gap: 5 }}>
+                <div style={{ marginTop: 8, display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                   <span className={`tag ${c.status === 'approved' ? 'good' : 'off'}`}>{c.status}</span>
                   <span className="tag off">{c.provider}</span>
+                  {isCampaignReady(c) && <span className="tag good">✓ campaign-ready</span>}
                 </div>
+                <CreativeCampaignFields creative={c} onSaved={patchCreative} />
               </div>
               <div className="acts">
                 <a className="btn sm" href={c.image_data} download={`creative-${c.id}.png`}>Download</a>
-                <button className="btn sm" onClick={() => approve(c.id)}>Approve</button>
+                {c.status !== 'approved' && <button className="btn sm" onClick={() => approve(c.id)}>Approve</button>}
                 <button className="btn sm ghost danger" onClick={() => remove(c.id)}>Delete</button>
               </div>
             </div>

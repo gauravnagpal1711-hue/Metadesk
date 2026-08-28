@@ -10,6 +10,7 @@ import { authRouter, requireAuth } from './auth.js';
 import { creativesRouter } from './routes/creatives.js';
 import { campaignsRouter } from './routes/campaigns.js';
 import { leadsRouter } from './routes/leads.js';
+import { campaignBriefsRouter } from './routes/campaignBriefs.js';
 import { whatsappRouter } from './routes/whatsapp.js';
 import { reachUsRouter } from './routes/reachUs.js';
 import { facebookRouter, restoreConnection } from './routes/facebook.js';
@@ -40,6 +41,7 @@ app.use('/api/facebook', (req, res, next) => {
 app.use('/api', requireAuth);
 app.use('/api/creatives', creativesRouter);
 app.use('/api/campaigns', campaignsRouter);
+app.use('/api/campaign-briefs', campaignBriefsRouter);
 app.use('/api/leads', leadsRouter);
 app.use('/api/whatsapp', whatsappRouter);
 app.use('/api/reach-us', reachUsRouter);
