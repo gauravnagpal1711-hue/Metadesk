@@ -98,20 +98,39 @@ async function extractMedia(rawMessage, fullMessage) {
         }
 }
 
+/**
+ * Resolve the phone number of the *lead* a message belongs to — i.e. the chat's
+ * counterparty, never us. For a 1:1 chat that's the chat JID itself; when the
+ * chat is addressed by a privacy @lid, Baileys 7 carries the real number in
+ * remoteJidAlt/participantAlt.
+ *
+ * senderPn/participantPn identify the *sender*. For an inbound message that's the
+ * lead (useful fallback), but for our own outbound replies (key.fromMe) it's our
+ * own number — so consulting them there resolved every phone-sent reply to us,
+ * matched no lead, and the reply was dropped. Only use them for inbound.
+ */
+function resolveCounterpartyPhone(m) {
+        const jid = m.key.remoteJid || '';
+        if (
+                  jid.endsWith('@g.us') ||        // groups
+                  jid.endsWith('@newsletter') ||  // channels
+                  jid === 'status@broadcast' ||   // status updates
+                  jid.endsWith('@broadcast')      // broadcast lists
+        ) {
+                  return null;
+        }
+        const jidNumber = jid.endsWith('@lid') ? null : jid.split('@')[0];
+        const candidates = m.key.fromMe
+                  ? [m.key.remoteJidAlt, jidNumber, m.key.participantAlt]
+                  : [m.key.senderPn, m.key.participantPn, m.key.remoteJidAlt, m.key.participantAlt, jidNumber];
+        const raw = candidates.find(Boolean);
+        const digits = raw ? String(raw).replace(/\D/g, '') : '';
+        return digits || null;
+}
+
 /** Shared shape-normalizer for both live messages and history-sync messages. Returns null to skip. */
 async function extractMessage(m) {
-        const jid = m.key.remoteJid || '';
-        if (jid.endsWith('@g.us')) return null; // skip groups
-
-  // Baileys 7 exposes the real phone number for @lid-addressed chats via
-  // remoteJidAlt/participantAlt instead of the old senderPn/participantPn fields.
-  const rawFrom =
-                  m.key.senderPn ||
-                  m.key.participantPn ||
-                  m.key.remoteJidAlt ||
-                  m.key.participantAlt ||
-                  (jid.endsWith('@lid') ? null : jid.split('@')[0]);
-        const from = rawFrom ? String(rawFrom).replace(/\D/g, '') : '';
+        const from = resolveCounterpartyPhone(m);
         if (!from) return null;
 
   const msgKeys = Object.keys(m.message || {});
@@ -195,20 +214,19 @@ export async function startWeb() {
   });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-            // Temporary diagnostic: confirm what's actually arriving before deciding
-            // whether the type !== 'notify' filter below is dropping real ad-click messages.
-            console.log(`[WhatsApp] messages.upsert type=${type} count=${messages?.length || 0}`,
-                        JSON.stringify((messages || []).map((m) => ({
-                                  remoteJid: m.key.remoteJid,
-                                  remoteJidAlt: m.key.remoteJidAlt,
-                                  fromMe: m.key.fromMe,
-                                  hasContent: Object.keys(m.message || {}).length > 0
-                        }))));
-            if (type !== 'notify') return;
+            // 'notify'  — a freshly arrived message (inbound, or WhatsApp waking us for it)
+            // 'append'  — a message tacked onto a chat without a notification: this is how
+            //             replies you send from the *phone* itself typically reach a
+            //             companion device. Dropping it lost every phone-sent reply.
+            // Anything else (e.g. 'prepend' backfill) we ignore — history sync handles bulk.
+            if (type !== 'notify' && type !== 'append') return;
             for (const m of messages) {
                         const extracted = await extractMessage(m);
                         if (!extracted) {
-                                      console.warn('Skipping WhatsApp message: no phone number or empty/undecryptable payload. key:', JSON.stringify(m.key));
+                                      console.warn(
+                                                    `[WhatsApp] Skipping message (type=${type}): no lead phone or empty/undecryptable payload. key:`,
+                                                    JSON.stringify(m.key)
+                                      );
                                       continue;
                         }
               await onIncoming(extracted).catch((e) => console.error('Incoming handler failed:', e.message));
