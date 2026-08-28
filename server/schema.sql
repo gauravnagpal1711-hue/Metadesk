@@ -169,6 +169,20 @@ position INTEGER NOT NULL DEFAULT 0,
 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Requested changes to a live campaign. name/budget/status apply instantly via
+-- PATCH /api/campaigns/:id; audience/schedule/creative changes are queued here
+-- for Claude Code's MCP connector to apply.
+CREATE TABLE IF NOT EXISTS campaign_edits (
+id SERIAL PRIMARY KEY,
+meta_campaign_id TEXT NOT NULL,
+campaign_name TEXT,
+changes JSONB NOT NULL DEFAULT '{}'::jsonb,
+status TEXT NOT NULL DEFAULT 'ready', -- ready | applied | archived
+notes TEXT,
+created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+applied_at TIMESTAMPTZ
+);
+
 -- Campaign briefs: the app assembles these; Claude Code creates the real Meta
 -- campaign from a brief (via MCP) and writes the meta_* ids back here.
 CREATE TABLE IF NOT EXISTS campaign_briefs (

@@ -10,14 +10,16 @@ export const EMPTY_FILTERS = {
   appointment: '',
   valueMin: '',
   valueMax: '',
-  createdAfter: ''
+  createdAfter: '',
+  adsDeskOnly: false
 };
 
 export function countActiveFilters(f) {
   return (
     f.stages.length + f.sources.length + f.campaigns.length + f.tags.length +
     (f.followup ? 1 : 0) + (f.appointment ? 1 : 0) +
-    (f.valueMin !== '' ? 1 : 0) + (f.valueMax !== '' ? 1 : 0) + (f.createdAfter ? 1 : 0)
+    (f.valueMin !== '' ? 1 : 0) + (f.valueMax !== '' ? 1 : 0) + (f.createdAfter ? 1 : 0) +
+    (f.adsDeskOnly ? 1 : 0)
   );
 }
 
@@ -124,6 +126,11 @@ export default function LeadFilterBar({ filters, onChange, stages, campaigns, ta
           className="input" type="date" style={{ width: 140 }}
           value={filters.createdAfter} onChange={(e) => set({ createdAfter: e.target.value })}
         />
+      </label>
+
+      <label className="filter-inline" style={{ textTransform: 'none', letterSpacing: 0 }}>
+        <input type="checkbox" checked={filters.adsDeskOnly} onChange={(e) => set({ adsDeskOnly: e.target.checked })} />
+        Ads Desk campaigns only
       </label>
 
       {active > 0 && (

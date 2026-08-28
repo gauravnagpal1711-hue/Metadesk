@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, money, when } from '../api.js';
 import CreateCampaignModal from '../components/CreateCampaignModal.jsx';
+import CampaignEditModal from '../components/CampaignEditModal.jsx';
 import WhatsAppNumberSetting from '../components/WhatsAppNumberSetting.jsx';
 
 export default function Campaigns({ rows, setRows, conn, onSynced }) {
@@ -9,21 +10,34 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
   const [drafts, setDrafts] = useState({});
   const [creatives, setCreatives] = useState([]);
   const [briefs, setBriefs] = useState([]);
+  const [edits, setEdits] = useState([]);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState(null); // a campaign row
 
   useEffect(() => {
     api.get('/creatives').then(setCreatives).catch(() => {});
     api.get('/campaign-briefs').then(setBriefs).catch(() => {});
+    api.get('/campaign-edits').then(setEdits).catch(() => {});
   }, []);
+
+  // Campaigns that were built in Ads Desk (brief -> real campaign id).
+  const adsDeskIds = useMemo(
+    () => new Set(briefs.map((b) => b.meta_campaign_id).filter(Boolean)),
+    [briefs]
+  );
 
   async function deleteBrief(id) {
     if (!window.confirm('Delete this campaign brief?')) return;
     try {
       await api.del(`/campaign-briefs/${id}`);
       setBriefs((b) => b.filter((x) => x.id !== id));
-    } catch (e) {
-      setError(e.message);
-    }
+    } catch (e) { setError(e.message); }
+  }
+  async function deleteEdit(id) {
+    try {
+      await api.del(`/campaign-edits/${id}`);
+      setEdits((e) => e.filter((x) => x.id !== id));
+    } catch (e) { setError(e.message); }
   }
 
   async function sync() {
@@ -33,11 +47,7 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
       const out = await api.post('/campaigns/sync');
       setRows(out.campaigns);
       onSynced?.();
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
+    } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
 
   async function toggle(c) {
@@ -46,9 +56,7 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
     try {
       await api.patch(`/campaigns/${c.id}`, { status: next });
       setRows((r) => r.map((x) => (x.id === c.id ? { ...x, status: next, effective_status: next } : x)));
-    } catch (e) {
-      setError(e.message);
-    }
+    } catch (e) { setError(e.message); }
   }
 
   async function saveBudget(c) {
@@ -58,9 +66,12 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
     try {
       await api.patch(`/campaigns/${c.id}`, { daily_budget: Number(value) });
       setRows((r) => r.map((x) => (x.id === c.id ? { ...x, daily_budget: Number(value) } : x)));
-    } catch (e) {
-      setError(e.message);
-    }
+    } catch (e) { setError(e.message); }
+  }
+
+  function applyInstant(patch) {
+    // CampaignEditModal already called PATCH /campaigns/:id for name/budget/status.
+    setRows((r) => r.map((x) => (x.id === patch.id ? { ...x, ...patch } : x)));
   }
 
   return (
@@ -96,11 +107,11 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
               <tr>
                 <th>Campaign</th>
                 <th>Status</th>
-                <th style={{ textAlign: 'right' }}>Daily budget</th>
-                <th style={{ textAlign: 'right' }}>Spend</th>
+                <th style={{ textAlign: 'right' }}>Per day</th>
+                <th style={{ textAlign: 'right' }}>Spent</th>
                 <th style={{ textAlign: 'right' }}>Leads</th>
-                <th style={{ textAlign: 'right' }}>CPL</th>
-                <th style={{ textAlign: 'right' }}>CTR</th>
+                <th style={{ textAlign: 'right' }} title="Cost per lead — spend ÷ leads">Cost / lead</th>
+                <th style={{ textAlign: 'right' }} title="Click-through rate">CTR</th>
                 <th style={{ textAlign: 'right' }}>Action</th>
               </tr>
             </thead>
@@ -108,17 +119,16 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
               {rows.map((c) => (
                 <tr key={c.id}>
                   <td>
-                    <div className="name">{c.name}</div>
+                    <div className="name">
+                      {c.name}
+                      {adsDeskIds.has(c.id) && <span className="tag good" style={{ marginLeft: 6 }}>Ads Desk</span>}
+                    </div>
                     <div className="num" style={{ fontSize: 10.5, color: 'var(--muted-2)', marginTop: 2 }}>{c.id}</div>
                   </td>
-                  <td>
-                    <span className={`tag ${c.status === 'ACTIVE' ? 'good' : 'off'}`}>{c.status || '—'}</span>
-                  </td>
+                  <td><span className={`tag ${c.status === 'ACTIVE' ? 'good' : 'off'}`}>{c.status === 'ACTIVE' ? 'Running' : 'Paused'}</span></td>
                   <td style={{ textAlign: 'right' }}>
                     <input
-                      className="input budget-input num"
-                      type="number"
-                      min="0"
+                      className="input budget-input num" type="number" min="0"
                       value={drafts[c.id] ?? (c.daily_budget ?? '')}
                       onChange={(e) => setDrafts({ ...drafts, [c.id]: e.target.value })}
                       onBlur={() => saveBudget(c)}
@@ -126,11 +136,12 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
                       placeholder="—"
                     />
                   </td>
-                  <td className="num" style={{ textAlign: 'right' }}>{money(c.spend)}</td>
+                  <td className="num" style={{ textAlign: 'right' }}>₹{money(c.spend)}</td>
                   <td className="num" style={{ textAlign: 'right' }}>{money(c.leads_count)}</td>
-                  <td className="num" style={{ textAlign: 'right' }}>{Number(c.cpl) ? money(c.cpl) : '—'}</td>
+                  <td className="num" style={{ textAlign: 'right' }}>{Number(c.cpl) ? `₹${money(c.cpl)}` : '—'}</td>
                   <td className="num" style={{ textAlign: 'right' }}>{Number(c.ctr).toFixed(2)}%</td>
-                  <td style={{ textAlign: 'right' }}>
+                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <button className="btn sm" onClick={() => setEditing(c)}>Edit</button>{' '}
                     <button className="btn sm" onClick={() => toggle(c)}>
                       {c.status === 'ACTIVE' ? 'Pause' : 'Resume'}
                     </button>
@@ -146,25 +157,22 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
         </div>
       )}
 
-      {briefs.length > 0 && (
+      {(briefs.length > 0 || edits.length > 0) && (
         <div style={{ marginTop: 28 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-            <h2 style={{ margin: 0, fontSize: 16 }}>Campaign briefs</h2>
-            <span className="mono-label">{briefs.length}</span>
+            <h2 style={{ margin: 0, fontSize: 16 }}>Campaign changes</h2>
+            <span className="mono-label">{briefs.length + edits.length}</span>
           </div>
           <div className="scroll-x">
             <table className="table">
               <thead>
-                <tr>
-                  <th>Name</th><th>Creative</th><th style={{ textAlign: 'right' }}>Daily ₹</th><th>Status</th><th>Next step</th><th></th>
-                </tr>
+                <tr><th>What</th><th style={{ textAlign: 'right' }}>Daily ₹</th><th>Status</th><th>Next step</th><th></th></tr>
               </thead>
               <tbody>
                 {briefs.map((b) => (
-                  <tr key={b.id}>
-                    <td><div className="name">{b.name}</div><div className="num" style={{ fontSize: 10.5, color: 'var(--muted-2)' }}>brief #{b.id}</div></td>
-                    <td>{b.creative_label || b.creative_headline || (b.creative_id ? `#${b.creative_id}` : '—')}</td>
-                    <td className="num" style={{ textAlign: 'right' }}>{b.daily_budget ? money(b.daily_budget) : '—'}</td>
+                  <tr key={`b${b.id}`}>
+                    <td><div className="name">New: {b.name}</div><div className="num" style={{ fontSize: 10.5, color: 'var(--muted-2)' }}>brief #{b.id}</div></td>
+                    <td className="num" style={{ textAlign: 'right' }}>{b.daily_budget ? `₹${money(b.daily_budget)}` : '—'}</td>
                     <td><span className={`tag ${b.status === 'created' || b.status === 'live' ? 'good' : b.status === 'ready' ? 'warn' : 'off'}`}>{b.status}</span></td>
                     <td style={{ fontSize: 12.5 }}>
                       {b.status === 'ready' && <>Tell Claude: <code>create campaign brief #{b.id}</code></>}
@@ -172,9 +180,19 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
                       {b.status === 'created' && <>PAUSED on Meta · <span className="num">{b.meta_campaign_id}</span> · say <code>turn on brief #{b.id}</code></>}
                       {b.status === 'live' && <>Live · <span className="num">{b.meta_campaign_id}</span></>}
                     </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button className="btn sm ghost danger" onClick={() => deleteBrief(b.id)}>Delete</button>
+                    <td style={{ textAlign: 'right' }}><button className="btn sm ghost danger" onClick={() => deleteBrief(b.id)}>Delete</button></td>
+                  </tr>
+                ))}
+                {edits.map((e) => (
+                  <tr key={`e${e.id}`}>
+                    <td><div className="name">Edit: {e.campaign_name || e.meta_campaign_id}</div><div className="num" style={{ fontSize: 10.5, color: 'var(--muted-2)' }}>change #{e.id}</div></td>
+                    <td className="num" style={{ textAlign: 'right' }}>—</td>
+                    <td><span className={`tag ${e.status === 'applied' ? 'good' : e.status === 'ready' ? 'warn' : 'off'}`}>{e.status}</span></td>
+                    <td style={{ fontSize: 12.5 }}>
+                      {e.status === 'ready' && <>Tell Claude: <code>apply campaign edit #{e.id}</code></>}
+                      {e.status === 'applied' && 'Applied on Meta'}
                     </td>
+                    <td style={{ textAlign: 'right' }}><button className="btn sm ghost danger" onClick={() => deleteEdit(e.id)}>Delete</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -188,6 +206,16 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
           creatives={creatives}
           onClose={() => setCreateOpen(false)}
           onSaved={(saved) => { setBriefs((b) => [saved, ...b]); setCreateOpen(false); }}
+        />
+      )}
+
+      {editing && (
+        <CampaignEditModal
+          campaign={editing}
+          creatives={creatives}
+          onClose={() => setEditing(null)}
+          onInstant={applyInstant}
+          onQueued={(edit) => { setEdits((e) => [edit, ...e]); }}
         />
       )}
     </>

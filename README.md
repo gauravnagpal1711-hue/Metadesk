@@ -145,6 +145,20 @@ with no extra code.
 **Turning it on** is a separate explicit request — `turn on brief #<id>` →
 `ads_activate_entity` on the campaign + ad set, then `PATCH … status=live`.
 
+**Editing a campaign** — the **Edit** button on a campaign row. Name, running/paused
+and daily budget apply instantly (`PATCH /api/campaigns/:id` → `setStatus` /
+`setDailyBudget` / `renameObject`). Audience / schedule / creative-swap changes are
+queued as a `campaign_edits` row (`/api/campaign-edits`) and shown under **Campaign
+changes**; apply with `apply campaign edit #<id>` → `ads_update_entity` on the ad
+set for targeting/schedule, or a fresh `ads_create_creative` + `ads_create_ad`
+(and pause the old ad) for a picture swap, then `PATCH /api/campaign-edits/:id
+status=applied`.
+
+**Lead attribution** — leads whose `campaign_id` matches a
+`campaign_briefs.meta_campaign_id` are tagged **Ads Desk** on the board, table and
+lead drawer, and the Leads filter bar has an *"Ads Desk campaigns only"* toggle
+(`GET /api/leads/list?adsdesk=1`, `from_adsdesk` on `/board` + `/:id`).
+
 **Safety / testing:** the FB OAuth token already carries `ads_management`.
 Everything is created `PAUSED`; verify with `ads_get_ad_preview`; **never run the
 turn-on step while testing**; delete test campaigns afterward (Ads Manager or an

@@ -382,7 +382,10 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
         <div className="drawer-info">
           <div className="cell">
             <div className="k">Source</div>
-            <div className="v">{lead.campaign_name || lead.source || '—'}</div>
+            <div className="v">
+              {lead.campaign_name || lead.source || '—'}
+              {lead.from_adsdesk && <span className="tag good" style={{ marginLeft: 5 }}>Ads Desk</span>}
+            </div>
           </div>
           <div className="cell">
             <div className="k">In stage</div>

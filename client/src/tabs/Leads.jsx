@@ -37,6 +37,7 @@ function matchesFilters(lead, f, term) {
   if (f.valueMin !== '' && Number(lead.value || 0) < Number(f.valueMin)) return false;
   if (f.valueMax !== '' && Number(lead.value || 0) > Number(f.valueMax)) return false;
   if (f.createdAfter && new Date(lead.created_at) < new Date(f.createdAfter)) return false;
+  if (f.adsDeskOnly && !lead.from_adsdesk) return false;
   return true;
 }
 

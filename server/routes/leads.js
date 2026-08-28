@@ -12,7 +12,10 @@ const LEAD_ENRICH = `
   (SELECT count(*)::int FROM remarks r WHERE r.lead_id = l.id) AS remark_count,
   (SELECT max(created_at) FROM messages m WHERE m.lead_id = l.id) AS last_message_at,
   (SELECT count(*)::int FROM tasks t WHERE t.lead_id = l.id AND t.done = false) AS open_task_count,
-  (SELECT min(due_at) FROM tasks t WHERE t.lead_id = l.id AND t.done = false) AS next_task_due_at`;
+  (SELECT min(due_at) FROM tasks t WHERE t.lead_id = l.id AND t.done = false) AS next_task_due_at,
+  (l.campaign_id IS NOT NULL AND EXISTS (
+     SELECT 1 FROM campaign_briefs b WHERE b.meta_campaign_id = l.campaign_id
+  )) AS from_adsdesk`;
 
 const LIST_SORT_COLUMNS = {
   created: 'l.created_at',
@@ -47,6 +50,10 @@ function buildLeadFilter(query) {
 
   const tags = asArray(query.tag);
   if (tags.length) clauses.push(`l.tags && ${add(tags)}::text[]`);
+
+  if (query.adsdesk === '1' || query.adsdesk === 'true') {
+    clauses.push(`l.campaign_id IS NOT NULL AND EXISTS (SELECT 1 FROM campaign_briefs b WHERE b.meta_campaign_id = l.campaign_id)`);
+  }
 
   if (query.value_min !== undefined && query.value_min !== '') clauses.push(`COALESCE(l.value,0) >= ${add(Number(query.value_min))}`);
   if (query.value_max !== undefined && query.value_max !== '') clauses.push(`COALESCE(l.value,0) <= ${add(Number(query.value_max))}`);
@@ -522,7 +529,13 @@ leadsRouter.post('/bulk-delete', async (req, res, next) => {
 
 leadsRouter.get('/:id', async (req, res, next) => {
   try {
-    const { rows } = await q('SELECT * FROM leads WHERE id=$1 AND is_meta_verified = true', [req.params.id]);
+    const { rows } = await q(
+      `SELECT l.*, (l.campaign_id IS NOT NULL AND EXISTS (
+         SELECT 1 FROM campaign_briefs b WHERE b.meta_campaign_id = l.campaign_id
+       )) AS from_adsdesk
+       FROM leads l WHERE l.id=$1 AND l.is_meta_verified = true`,
+      [req.params.id]
+    );
     if (!rows.length) return res.status(404).json({ error: 'That lead no longer exists or is pending Meta verification.' });
     const { rows: messages } = await q(
       'SELECT * FROM messages WHERE lead_id=$1 ORDER BY created_at ASC',

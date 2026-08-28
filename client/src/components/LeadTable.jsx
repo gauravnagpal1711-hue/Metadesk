@@ -27,6 +27,7 @@ function filtersToParams(filters, query, sort, page) {
     value_min: filters.valueMin,
     value_max: filters.valueMax,
     created_after: filters.createdAfter ? `${filters.createdAfter}T00:00:00` : '',
+    adsdesk: filters.adsDeskOnly ? '1' : '',
     q: query || '',
     sort: `${sort.field}:${sort.dir}`,
     page,
@@ -226,7 +227,10 @@ export default function LeadTable({ filters, query, stages, onOpenLead, reloadSi
                       {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
                   </td>
-                  <td>{lead.campaign_name || '—'}</td>
+                  <td>
+                    {lead.campaign_name || '—'}
+                    {lead.from_adsdesk && <span className="tag good" style={{ marginLeft: 5 }}>Ads Desk</span>}
+                  </td>
                   <td className="num">{lead.value ? `₹${money(lead.value)}` : '—'}</td>
                   <td>
                     {(lead.tags || []).length === 0 ? '—' : lead.tags.map((t) => <span key={t} className="tag off">{t}</span>)}

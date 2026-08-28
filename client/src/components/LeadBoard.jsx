@@ -177,7 +177,12 @@ export default function LeadBoard({ stages, leads, onOpenLead, onReload, setErro
                           {lead.phone}
                         </div>
                       )}
-                      {lead.campaign_name && <div className="campaign">{lead.campaign_name}</div>}
+                      {lead.campaign_name && (
+                        <div className="campaign">
+                          {lead.campaign_name}
+                          {lead.from_adsdesk && <span className="tag good" style={{ marginLeft: 5 }}>Ads Desk</span>}
+                        </div>
+                      )}
                       {lead.tags?.length > 0 && (
                         <div className="lead-tags">
                           {lead.tags.map((t) => <span key={t} className="tag off">{t}</span>)}
