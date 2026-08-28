@@ -128,7 +128,7 @@ export default function CreateCampaignModal({ creatives, onClose, onSaved }) {
 
           {ready.length === 0 ? (
             <div className="notice">
-              No creatives are set up for campaigns yet. In <strong>Build Your Brand</strong>, approve a creative and choose
+              No creatives are set up for campaigns yet. In <strong>Advertise your Brand</strong>, approve a creative and choose
               what happens when someone taps the ad.
             </div>
           ) : (

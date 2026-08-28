@@ -10,7 +10,7 @@ import Facebook from './tabs/Facebook.jsx';
 import ReachUs from './tabs/ReachUs.jsx';
 
 const TABS = [
-  { id: 'creative', label: 'Build Your Brand', title: 'Build Your Brand', sub: 'Brief, image prompts, and creative gallery' },
+  { id: 'creative', label: 'Advertise your Brand', title: 'Advertise your Brand', sub: 'Brief, image prompts, and creative gallery' },
   { id: 'campaigns', label: 'Campaigns', title: 'Campaigns', sub: 'Live from Meta Marketing API · inline budget edit' },
   { id: 'leads', label: 'Leads', title: 'Leads', sub: 'Drag leads through the funnel · click for detail' },
   { id: 'insights', label: 'Insights', title: 'Insights', sub: 'Pipeline conversion, velocity and lead sources' },

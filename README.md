@@ -103,7 +103,7 @@ Everything the shopkeeper sees is one short question per step; Meta's real knobs
 
 **Flow**
 
-1. **Build Your Brand → gallery card → "Set up for campaign".** Name it, choose
+1. **Advertise your Brand → gallery card → "Set up for campaign".** Name it, choose
    what happens on tap — *Message you on WhatsApp* (number auto-detected, no
    typing), *Fill your form* (pick an existing Page form), or *Visit your website*
    (URL) — then **Approve**. Shows `✓ campaign-ready`.
