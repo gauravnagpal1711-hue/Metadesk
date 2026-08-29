@@ -275,6 +275,10 @@ export function buildTargeting(audience = {}) {
     .map((i) => ({ id: String(i.id), name: i.name }));
   if (interests.length) t.flexible_spec = [{ interests }];
 
+  // Meta requires an explicit choice on Advantage audience expansion.
+  // 0 = keep the manual targeting above as-is.
+  t.targeting_automation = { advantage_audience: 0 };
+
   return t;
 }
 
