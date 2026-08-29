@@ -130,13 +130,32 @@ export async function ingestIncoming(userId, m) {
 async function ingestHistoryBatch(userId, items) {
   if (!userId) return;
   let attached = 0;
+  let reconciled = 0;
   for (const item of items) {
     try {
       const phone = normalisePhone(item.from);
       const { rows } = await q('SELECT * FROM leads WHERE phone = $1 AND user_id = $2 ORDER BY created_at ASC LIMIT 1', [phone, userId]);
       const lead = rows[0];
       if (!lead || !lead.is_meta_verified) continue; // never import non-lead (personal) chats
-      if (await alreadyStored(userId, item.wa_message_id)) continue;
+
+      if (await alreadyStored(userId, item.wa_message_id)) {
+        // Already have the message, but an earlier sync may have stored it before
+        // we could read click-to-WhatsApp ad / quoted-reply context. Backfill
+        // that now — never overwriting anything already captured.
+        if (item.meta?.ad_reply && !lead.ad_referral) {
+          await captureAdReferral(userId, lead.id, item.meta.ad_reply);
+        }
+        if (item.meta) {
+          const { rowCount } = await q(
+            `UPDATE messages SET meta = $1
+             WHERE wa_message_id = $2 AND user_id = $3 AND lead_id = $4 AND meta IS NULL`,
+            [JSON.stringify(item.meta), item.wa_message_id, userId, lead.id]
+          );
+          if (rowCount) reconciled++;
+        }
+        continue;
+      }
+
       await q(
         `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, media_data, media_mime, meta, created_at, user_id)
         VALUES ($1,$2,'whatsapp',$3,$4,$5,$6,$7,$8,$9)`,
@@ -149,7 +168,9 @@ async function ingestHistoryBatch(userId, items) {
       console.error('History backfill failed for one message:', e.message);
     }
   }
-  if (attached > 0) console.log(`[WhatsApp u${userId}] History sync: attached ${attached} message(s)`);
+  if (attached || reconciled) {
+    console.log(`[WhatsApp u${userId}] History sync: attached ${attached}, reconciled ${reconciled} message(s)`);
+  }
 }
 
 onWebMessage(ingestIncoming);
