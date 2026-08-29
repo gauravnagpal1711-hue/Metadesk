@@ -567,6 +567,7 @@ export async function createLeadForm(conn, spec = {}) {
       title: (spec.thank_you_title || 'Thank you!').slice(0, 60),
       body: (spec.thank_you_body || 'We will be in touch soon.').slice(0, 200),
       button_type: 'VIEW_WEBSITE',
+      button_text: (spec.thank_you_button || 'Visit website').slice(0, 60),
       website_url: privacyUrl
     }
   };
