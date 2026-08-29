@@ -653,11 +653,16 @@ leadsRouter.post('/:id/wa/load-earlier', async (req, res, next) => {
       [req.params.id, uid]
     );
     const a = anchorRows[0];
-    const anchor = a
-      ? { id: a.wa_message_id, fromMe: a.direction === 'out', tsMs: new Date(a.created_at).getTime() }
-      : null;
+    if (!a) {
+      // No stored message carries a WhatsApp id, so there's nothing to anchor the
+      // history request on — firing it anyway just no-ops silently.
+      return res.status(400).json({
+        error: 'No synced WhatsApp message in this chat to page back from. Re-pair WhatsApp Web (Connect tab → Log out → scan the QR) to pull full history for every chat at once.'
+      });
+    }
+    const anchor = { id: a.wa_message_id, fromMe: a.direction === 'out', tsMs: new Date(a.created_at).getTime() };
     await fetchChatHistory(uid, phone, anchor, 50);
-    res.json({ ok: true, requested: true, had: a?.total ?? 0 });
+    res.json({ ok: true, requested: true, had: a.total ?? 0 });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
