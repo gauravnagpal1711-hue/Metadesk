@@ -13,7 +13,7 @@ import { leadsRouter } from './routes/leads.js';
 import { campaignBriefsRouter } from './routes/campaignBriefs.js';
 import { campaignEditsRouter } from './routes/campaignEdits.js';
 import { metaTargetingRouter } from './routes/metaTargeting.js';
-import { whatsappRouter } from './routes/whatsapp.js';
+import { whatsappRouter, attachPending } from './routes/whatsapp.js';
 import { reachUsRouter } from './routes/reachUs.js';
 import { facebookRouter } from './routes/facebook.js';
 import { loadConnection, connConfigured, listCampaigns, listLeadForms, fetchFormLeads, flattenLead, normalisePhone } from './services/meta.js';
@@ -140,25 +140,10 @@ async function syncTenant(uid) {
           [raw.id, normalizedPhone, uid]
         );
 
-        // Attach pending messages to this lead
+        // Attach any queued WhatsApp messages to this now-verified lead.
         if (upgradedLeads.length > 0) {
-          const leadId = upgradedLeads[0].id;
-          const { rows: pendingMsgs } = await q(
-            `SELECT * FROM pending_messages WHERE phone = $1 AND user_id = $2 ORDER BY created_at ASC`,
-            [normalizedPhone, uid]
-          );
-
-          for (const msg of pendingMsgs) {
-            await q(
-              `INSERT INTO messages (lead_id, direction, channel, body, created_at, user_id)
-              VALUES ($1, 'in', $2, $3, $4, $5)`,
-              [leadId, msg.channel, msg.body, msg.created_at, uid]
-            );
-          }
-
-          // Clean up pending messages
-          await q(`DELETE FROM pending_messages WHERE phone = $1 AND user_id = $2`, [normalizedPhone, uid]);
-          console.log(`[Meta Sync] Upgraded pending lead for ${normalizedPhone} - attached ${pendingMsgs.length} queued messages`);
+          const n = await attachPending(uid, normalizedPhone, upgradedLeads[0].id);
+          if (n) console.log(`[Meta Sync] Attached ${n} queued message(s) for ${normalizedPhone}`);
         }
       }
     }

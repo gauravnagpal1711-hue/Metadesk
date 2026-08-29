@@ -43,6 +43,34 @@ function MessageMedia({ mime, data }) {
   );
 }
 
+function dayLabel(iso) {
+  const d = new Date(iso);
+  const a = new Date(); a.setHours(0, 0, 0, 0);
+  const b = new Date(d); b.setHours(0, 0, 0, 0);
+  const diff = Math.round((a - b) / 86400000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return d.toLocaleDateString([], { day: 'numeric', month: 'short', ...(a.getFullYear() !== d.getFullYear() ? { year: 'numeric' } : {}) });
+}
+
+/** The click-to-WhatsApp ad card WhatsApp shows above the first message. */
+function AdCard({ ad }) {
+  if (!ad) return null;
+  return (
+    <div className="wa-ad-card">
+      {ad.thumbnail_url && <img src={ad.thumbnail_url} alt="" />}
+      <div className="wa-ad-body">
+        <div className="wa-ad-tag">From ad</div>
+        {ad.title && <div className="wa-ad-title">{ad.title}</div>}
+        {ad.body && <div className="wa-ad-text">{ad.body}</div>}
+        {ad.source_url && (
+          <a href={ad.source_url} target="_blank" rel="noreferrer" className="wa-ad-link">{ad.source_url}</a>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function LeadDrawer({ leadId, stages, onClose }) {
   const [data, setData] = useState(null);
   const [view, setView] = useState('chat');
@@ -50,6 +78,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   const [attachment, setAttachment] = useState(null); // { dataUrl, mime, name }
   const [suggestions, setSuggestions] = useState([]);
   const [suggesting, setSuggesting] = useState(false);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
@@ -154,6 +183,23 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
       setError(e.message);
     } finally {
       setSuggesting(false);
+    }
+  }
+
+  async function loadEarlier() {
+    setLoadingEarlier(true);
+    setError('');
+    try {
+      await api.post(`/leads/${leadId}/wa/load-earlier`);
+      // The phone sends older messages back asynchronously; re-fetch a few times.
+      for (let i = 0; i < 5; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        await load();
+      }
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoadingEarlier(false);
     }
   }
 
@@ -439,22 +485,51 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
           {error && <div className="notice bad">{error}</div>}
 
           {view === 'chat' && (
-            messages.length === 0 ? (
-              <div className="empty"><h3>No messages yet</h3>Send the first WhatsApp message below.</div>
-            ) : (
-              <>
-                {messages.map((m) => (
-                  <div key={m.id} className={`wa-bubble ${m.direction === 'out' ? 'out' : 'in'}`}>
-                    <MessageMedia mime={m.media_mime} data={m.media_data} />
-                    {m.body && <Linkified text={m.body} />}
-                    <span className="wa-meta">
-                      {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                ))}
-                <div ref={endRef} />
-              </>
-            )
+            <>
+              {lead.ad_referral && <AdCard ad={lead.ad_referral} />}
+
+              <div style={{ textAlign: 'center', margin: '2px 0 8px' }}>
+                <button className="btn ghost sm" onClick={loadEarlier} disabled={loadingEarlier}>
+                  {loadingEarlier ? 'Loading earlier messages…' : 'Load earlier messages'}
+                </button>
+              </div>
+
+              {messages.length === 0 ? (
+                <div className="empty"><h3>No messages yet</h3>Send the first WhatsApp message below.</div>
+              ) : (
+                messages.map((m, i) => {
+                  const prev = messages[i - 1];
+                  const showDay = !prev || new Date(prev.created_at).toDateString() !== new Date(m.created_at).toDateString();
+                  return (
+                    <div key={m.id}>
+                      {showDay && <div className="wa-day"><span>{dayLabel(m.created_at)}</span></div>}
+                      <div className={`wa-bubble ${m.direction === 'out' ? 'out' : 'in'}`}>
+                        {m.meta?.reply_to && (
+                          <div className="wa-quote">{m.meta.reply_to.body || '(message)'}</div>
+                        )}
+                        {m.meta?.ad_reply && <AdCard ad={m.meta.ad_reply} />}
+                        <MessageMedia mime={m.media_mime} data={m.media_data} />
+                        {m.body && <Linkified text={m.body} />}
+                        {m.meta?.buttons?.length > 0 && (
+                          <div className="wa-btns">
+                            {m.meta.buttons.map((b, bi) => (
+                              b.url
+                                ? <a key={bi} href={b.url} target="_blank" rel="noreferrer" className="wa-btn">{b.text || 'Open'}</a>
+                                : <span key={bi} className="wa-btn">{b.text}</span>
+                            ))}
+                          </div>
+                        )}
+                        <span className="wa-meta">
+                          {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {m.direction === 'out' ? ' ✓' : ''}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={endRef} />
+            </>
           )}
 
           {view === 'notes' && (

@@ -111,14 +111,28 @@ export function parseWebhook(payload) {
       for (const msg of value.messages || []) {
         const contact = contacts.find((c) => c.wa_id === msg.from);
         const mediaType = MEDIA_TYPES.find((t) => msg[t]);
+        const meta = {};
+        if (msg.referral) {
+          meta.ad_reply = {
+            title: msg.referral.headline || null,
+            body: msg.referral.body || null,
+            source_url: msg.referral.source_url || null,
+            source_id: msg.referral.source_id || msg.referral.ctwa_clid || null,
+            thumbnail_url: msg.referral.image_url || null,
+            media_type: msg.referral.media_type || null
+          };
+        }
+        if (mediaType && mediaType !== 'text') meta.subtype = mediaType;
         out.push({
           phone_number_id: phoneNumberId,
           from: msg.from,
           name: contact?.profile?.name || null,
-          body: msg.text?.body || msg.button?.text || (mediaType ? msg[mediaType]?.caption || null : `[${msg.type}]`),
+          body: msg.text?.body || msg.button?.text || (mediaType ? msg[mediaType]?.caption || null : null),
           wa_message_id: msg.id,
           ts: msg.timestamp ? new Date(Number(msg.timestamp) * 1000) : new Date(),
-          media: mediaType ? { id: msg[mediaType].id, mime_type: msg[mediaType].mime_type } : null
+          fromMe: false,
+          media: mediaType ? { id: msg[mediaType].id, mime_type: msg[mediaType].mime_type } : null,
+          meta: Object.keys(meta).length ? meta : null
         });
       }
     }

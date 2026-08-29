@@ -68,20 +68,105 @@ function unwrapMessage(msg) {
   return current || {};
 }
 
-function extractBody(rawMessage) {
+/** Best-effort readable text for any message type WhatsApp shows in a chat. */
+function describeMessage(rawMessage) {
   const msg = unwrapMessage(rawMessage);
-  return (
-    msg.conversation ||
-    msg.extendedTextMessage?.text ||
-    msg.imageMessage?.caption ||
-    msg.videoMessage?.caption ||
-    msg.documentMessage?.caption ||
-    msg.buttonsResponseMessage?.selectedDisplayText ||
-    msg.templateButtonReplyMessage?.selectedDisplayText ||
-    msg.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    msg.reactionMessage?.text ||
-    null
-  );
+  const out = { body: null, subtype: 'text', buttons: [] };
+
+  const tmpl = msg.templateMessage?.hydratedTemplate || msg.templateMessage?.hydratedFourRowTemplate;
+  const inter = msg.interactiveMessage;
+
+  if (msg.conversation) out.body = msg.conversation;
+  else if (msg.extendedTextMessage?.text) out.body = msg.extendedTextMessage.text;
+  else if (msg.imageMessage) { out.body = msg.imageMessage.caption || null; out.subtype = 'image'; }
+  else if (msg.videoMessage) { out.body = msg.videoMessage.caption || null; out.subtype = 'video'; }
+  else if (msg.documentMessage || msg.documentWithCaptionMessage) {
+    out.body = msg.documentMessage?.caption || msg.documentMessage?.fileName || null; out.subtype = 'document';
+  }
+  else if (msg.audioMessage) { out.subtype = msg.audioMessage.ptt ? 'voice' : 'audio'; }
+  else if (msg.stickerMessage) { out.subtype = 'sticker'; out.body = '(sticker)'; }
+  else if (msg.locationMessage) {
+    const l = msg.locationMessage;
+    out.subtype = 'location';
+    out.body = l.name || l.address || `📍 ${l.degreesLatitude}, ${l.degreesLongitude}`;
+  }
+  else if (msg.contactMessage) { out.subtype = 'contact'; out.body = `👤 ${msg.contactMessage.displayName || 'Contact'}`; }
+  else if (msg.contactsArrayMessage) { out.subtype = 'contact'; out.body = `👤 ${msg.contactsArrayMessage.contacts?.length || 0} contacts`; }
+  else if (tmpl) {
+    out.subtype = 'template';
+    out.body = tmpl.hydratedContentText || tmpl.hydratedTitleText || null;
+    out.buttons = (tmpl.hydratedButtons || []).map((b) => ({
+      text: b.urlButton?.displayText || b.callButton?.displayText || b.quickReplyButton?.displayText || null,
+      url: b.urlButton?.url || null
+    })).filter((b) => b.text);
+  }
+  else if (inter) {
+    out.subtype = 'interactive';
+    out.body = inter.body?.text || inter.header?.title || null;
+    const btns = inter.nativeFlowMessage?.buttons || [];
+    for (const b of btns) {
+      try {
+        const p = JSON.parse(b.buttonParamsJson || '{}');
+        if (p.display_text || p.url) out.buttons.push({ text: p.display_text || 'Open', url: p.url || null });
+      } catch { /* ignore */ }
+    }
+  }
+  else if (msg.buttonsMessage) {
+    out.subtype = 'interactive';
+    out.body = msg.buttonsMessage.contentText || msg.buttonsMessage.headerText || null;
+    out.buttons = (msg.buttonsMessage.buttons || []).map((b) => ({ text: b.buttonText?.displayText || null, url: null })).filter((b) => b.text);
+  }
+  else if (msg.listMessage) {
+    out.subtype = 'interactive';
+    out.body = msg.listMessage.description || msg.listMessage.title || null;
+  }
+  else if (msg.buttonsResponseMessage?.selectedDisplayText) out.body = msg.buttonsResponseMessage.selectedDisplayText;
+  else if (msg.templateButtonReplyMessage?.selectedDisplayText) out.body = msg.templateButtonReplyMessage.selectedDisplayText;
+  else if (msg.listResponseMessage?.title) out.body = msg.listResponseMessage.title;
+  else if (msg.pollCreationMessage || msg.pollCreationMessageV2 || msg.pollCreationMessageV3) {
+    const p = msg.pollCreationMessage || msg.pollCreationMessageV2 || msg.pollCreationMessageV3;
+    out.subtype = 'poll';
+    out.body = `📊 ${p.name || 'Poll'}: ${(p.options || []).map((o) => o.optionName).join(' · ')}`;
+  }
+  else if (msg.reactionMessage?.text) { out.subtype = 'reaction'; out.body = msg.reactionMessage.text; }
+  else if (msg.protocolMessage || msg.senderKeyDistributionMessage) { out.subtype = 'system'; }
+
+  return out;
+}
+
+/** Pull the quoted-reply preview and any click-to-WhatsApp ad card off a message. */
+function readContext(rawMessage) {
+  const msg = unwrapMessage(rawMessage);
+  const ctx =
+    msg.extendedTextMessage?.contextInfo ||
+    msg.imageMessage?.contextInfo ||
+    msg.videoMessage?.contextInfo ||
+    msg.documentMessage?.contextInfo ||
+    msg.buttonsMessage?.contextInfo ||
+    msg.templateMessage?.contextInfo ||
+    msg.listMessage?.contextInfo ||
+    msg.conversation?.contextInfo ||
+    msg.contextInfo ||
+    null;
+  if (!ctx) return {};
+
+  const out = {};
+  if (ctx.quotedMessage) {
+    const q = describeMessage(ctx.quotedMessage);
+    out.reply_to = { body: q.body || `(${q.subtype})` };
+  }
+  const ad = ctx.externalAdReply;
+  if (ad) {
+    out.ad_reply = {
+      title: ad.title || null,
+      body: ad.body || null,
+      source_url: ad.sourceUrl || null,
+      source_id: ad.sourceId || ad.ctwaClid || null,
+      thumbnail_url: ad.thumbnailUrl || null,
+      media_type: ad.mediaType || null
+    };
+  }
+  return out;
 }
 
 const MEDIA_KEYS = ['imageMessage', 'videoMessage', 'documentMessage', 'audioMessage', 'stickerMessage'];
@@ -119,17 +204,33 @@ async function extractMessage(m) {
   const from = resolveCounterpartyPhone(m);
   if (!from) return null;
   if (Object.keys(m.message || {}).length === 0) return null; // undecryptable / no content
-  const body = extractBody(m.message || {});
+
+  const desc = describeMessage(m.message || {});
+  if (desc.subtype === 'system') return null; // protocol/system chatter, never shown
   const media = await extractMedia(m.message || {}, m);
+  const ctx = readContext(m.message || {});
+
+  const meta = {};
+  if (ctx.reply_to) meta.reply_to = ctx.reply_to;
+  if (ctx.ad_reply) meta.ad_reply = ctx.ad_reply;
+  if (desc.subtype && desc.subtype !== 'text') meta.subtype = desc.subtype;
+  if (desc.buttons?.length) meta.buttons = desc.buttons;
+
+  let body = desc.body;
+  if (!body && !media) {
+    body = { image: '📷 Photo', video: '🎬 Video', document: '📄 Document', audio: '🎵 Audio', voice: '🎤 Voice message', sticker: '(sticker)' }[desc.subtype] || null;
+  }
+
   return {
     from,
     name: m.pushName || null,
-    body: body || (media ? null : '[media]'),
+    body,
     wa_message_id: m.key.id,
     ts: new Date(Number(m.messageTimestamp) * 1000),
     fromMe: !!m.key.fromMe,
     media_data: media?.media_data || null,
-    media_mime: media?.media_mime || null
+    media_mime: media?.media_mime || null,
+    meta: Object.keys(meta).length ? meta : null
   };
 }
 
@@ -209,10 +310,10 @@ export async function startWeb(userId) {
     }
   });
 
-  sock.ev.on('messaging-history.set', async ({ messages, isLatest }) => {
+  sock.ev.on('messaging-history.set', async ({ messages, isLatest, syncType }) => {
     const batch = (await Promise.all((messages || []).map(extractMessage))).filter(Boolean);
     if (batch.length === 0) return;
-    console.log(`[WhatsApp u${userId}] History sync: ${batch.length} messages${isLatest ? ' (final)' : ''}`);
+    console.log(`[WhatsApp u${userId}] History ${syncType === 3 || syncType === 'ON_DEMAND' ? '(on-demand) ' : ''}${batch.length} msgs${isLatest ? ' (final)' : ''}`);
     await onHistory(userId, batch).catch((e) => console.error('History sync handler failed:', e.message));
   });
 
@@ -231,6 +332,22 @@ export async function startAllWebSessions(userIds) {
       console.error(`WhatsApp autostart failed for user ${uid}:`, e.message);
     }
   }
+}
+
+/**
+ * Ask the phone for older messages in one chat. Results arrive asynchronously on
+ * the 'messaging-history.set' event and flow through onHistory(). `anchor` is the
+ * oldest message we already have: { id, fromMe, ts (unix seconds) }.
+ */
+export async function fetchChatHistory(userId, phone, anchor, count = 50) {
+  const s = sessions.get(userId);
+  if (!s || s.status !== 'connected' || !s.sock) throw new Error('WhatsApp Web is not connected.');
+  if (!s.sock.fetchMessageHistory) throw new Error('This WhatsApp version cannot fetch older messages.');
+  const jid = `${String(phone).replace(/\D/g, '')}@s.whatsapp.net`;
+  const key = { remoteJid: jid, id: anchor?.id || undefined, fromMe: !!anchor?.fromMe };
+  const ts = anchor?.ts ? Number(anchor.ts) : Math.floor(Date.now() / 1000);
+  await s.sock.fetchMessageHistory(Math.min(count, 50), key, ts);
+  return { requested: true };
 }
 
 export async function sendWebText(userId, phone, body) {

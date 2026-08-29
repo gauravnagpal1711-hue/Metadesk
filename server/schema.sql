@@ -102,6 +102,8 @@ ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_contacted_at TIMESTAMPTZ;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS lost_reason TEXT;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS stage_changed_at TIMESTAMPTZ NOT NULL DEFAULT now();
+-- Click-to-WhatsApp ad this lead came from: { title, body, source_url, source_id, thumbnail }
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS ad_referral JSONB;
 
 CREATE INDEX IF NOT EXISTS leads_stage_idx ON leads(stage_id);
 CREATE INDEX IF NOT EXISTS leads_phone_idx ON leads(phone);
@@ -122,6 +124,9 @@ created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_data TEXT;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_mime TEXT;
+-- Extra WhatsApp payload: { reply_to:{body,fromMe}, ad_reply:{title,body,source_url},
+-- subtype, buttons:[{text,url}] } — lets the app mirror the phone conversation.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS meta JSONB;
 
 CREATE INDEX IF NOT EXISTS messages_lead_idx ON messages(lead_id, created_at);
 
@@ -159,6 +164,12 @@ body TEXT NOT NULL,
 channel TEXT NOT NULL DEFAULT 'whatsapp',
 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE pending_messages ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'in';
+ALTER TABLE pending_messages ADD COLUMN IF NOT EXISTS wa_message_id TEXT;
+ALTER TABLE pending_messages ADD COLUMN IF NOT EXISTS media_data TEXT;
+ALTER TABLE pending_messages ADD COLUMN IF NOT EXISTS media_mime TEXT;
+ALTER TABLE pending_messages ADD COLUMN IF NOT EXISTS meta JSONB;
+ALTER TABLE pending_messages ALTER COLUMN body DROP NOT NULL; -- media/system messages have no text
 
 CREATE INDEX IF NOT EXISTS pending_messages_phone_idx ON pending_messages(phone);
 

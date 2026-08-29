@@ -28,69 +28,103 @@ async function alreadyStored(userId, wa_message_id) {
   return rows.length > 0;
 }
 
+/** Queue a message for a number that has no (verified) lead yet, keeping its
+ *  direction, media and metadata so nothing is lost. */
+async function queuePending(userId, phone, m) {
+  if (m.wa_message_id) {
+    const dup = await q('SELECT 1 FROM pending_messages WHERE wa_message_id = $1 AND user_id = $2 LIMIT 1', [m.wa_message_id, userId]);
+    if (dup.rows.length) return;
+  }
+  await q(
+    `INSERT INTO pending_messages (phone, body, direction, wa_message_id, media_data, media_mime, meta, channel, created_at, user_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'whatsapp',$8,$9)`,
+    [phone, m.body || null, m.fromMe ? 'out' : 'in', m.wa_message_id || null,
+     m.media_data || null, m.media_mime || null, m.meta ? JSON.stringify(m.meta) : null, m.ts || new Date(), userId]
+  );
+}
+
+/** Move any queued messages for a phone onto a real lead, in order. */
+export async function attachPending(userId, phone, leadId) {
+  const { rows: pend } = await q(
+    'SELECT * FROM pending_messages WHERE phone = $1 AND user_id = $2 ORDER BY created_at ASC',
+    [phone, userId]
+  );
+  if (!pend.length) return 0;
+  for (const p of pend) {
+    if (p.wa_message_id && await alreadyStored(userId, p.wa_message_id)) continue;
+    await q(
+      `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, media_data, media_mime, meta, created_at, user_id)
+       VALUES ($1,$2,'whatsapp',$3,$4,$5,$6,$7,$8,$9)`,
+      [leadId, p.direction || 'in', p.body, p.wa_message_id, p.media_data, p.media_mime,
+       p.meta ? JSON.stringify(p.meta) : null, p.created_at, userId]
+    );
+    if (p.meta?.ad_reply) await captureAdReferral(userId, leadId, p.meta.ad_reply);
+  }
+  await q('DELETE FROM pending_messages WHERE phone = $1 AND user_id = $2', [phone, userId]);
+  await q('UPDATE leads SET wants_whatsapp = true, updated_at = now() WHERE id = $1', [leadId]);
+  return pend.length;
+}
+
+async function captureAdReferral(userId, leadId, adReply) {
+  if (!adReply) return;
+  await q(
+    `UPDATE leads SET ad_referral = COALESCE(ad_referral, $3::jsonb), updated_at = now()
+     WHERE id = $1 AND user_id = $2`,
+    [leadId, userId, JSON.stringify(adReply)]
+  );
+}
+
 /**
- * Attach an incoming message to one user's lead, creating a PENDING lead if the
- * number is new. Only stores messages for Meta-verified leads. Shared by the
- * Cloud API webhook (routed by phone_number_id) and each user's Baileys socket.
+ * Attach a message to one user's lead, creating a lead if the first message
+ * looks like an ad-click. Shared by the Cloud webhook (routed by
+ * phone_number_id) and each user's Baileys socket. `m` = the extractMessage
+ * shape: { from, name, body, wa_message_id, ts, fromMe, media_data, media_mime, meta }.
  */
-export async function ingestIncoming(userId, { from, name, body, wa_message_id, ts, fromMe, media_data, media_mime }) {
+export async function ingestIncoming(userId, m) {
   if (!userId) return null;
-  const phone = normalisePhone(from);
+  const { name, body, wa_message_id, ts, fromMe, media_data, media_mime, meta } = m;
+  const phone = normalisePhone(m.from);
   const { rows } = await q('SELECT * FROM leads WHERE phone = $1 AND user_id = $2 ORDER BY created_at ASC LIMIT 1', [phone, userId]);
   let lead = rows[0];
 
-  if (fromMe) {
-    if (!lead || !lead.is_meta_verified) return lead || null;
-    if (await alreadyStored(userId, wa_message_id)) return lead;
-    await q(
-      `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, media_data, media_mime, created_at, user_id)
-      VALUES ($1,'out','whatsapp',$2,$3,$4,$5,$6,$7)`,
-      [lead.id, body, wa_message_id, media_data || null, media_mime || null, ts || new Date(), userId]
-    );
-    await q('UPDATE leads SET last_contacted_at = now(), updated_at = now() WHERE id = $1', [lead.id]);
-    console.log(`[WhatsApp u${userId}] Recorded phone-sent reply for lead ${lead.id}`);
-    return lead;
-  }
-
-  if (!lead) {
-    const onlyExistingLeads = await getSetting(userId, 'wa_only_existing_leads', false);
-    const patterns = await getSetting(userId, 'wa_ad_greeting_patterns', DEFAULT_AD_GREETING_PATTERNS);
-    if (onlyExistingLeads || !looksLikeAdGreeting(body, patterns)) {
-      await q(
-        `INSERT INTO pending_messages (phone, body, channel, created_at, user_id) VALUES ($1, $2, 'whatsapp', $3, $4)`,
-        [phone, body, ts || new Date(), userId]
-      );
-      console.log(`[WhatsApp u${userId}] Message from unknown number ${phone} queued`);
-      return null;
+  // No (verified) lead yet: either create one from an ad greeting, or queue.
+  if (!lead || !lead.is_meta_verified) {
+    if (!lead && !fromMe) {
+      const onlyExistingLeads = await getSetting(userId, 'wa_only_existing_leads', false);
+      const patterns = await getSetting(userId, 'wa_ad_greeting_patterns', DEFAULT_AD_GREETING_PATTERNS);
+      if (!onlyExistingLeads && looksLikeAdGreeting(body, patterns)) {
+        const { rows: firstStage } = await q('SELECT id FROM stages WHERE user_id = $1 ORDER BY position LIMIT 1', [userId]);
+        const inserted = await q(
+          `INSERT INTO leads (full_name, phone, source, wants_whatsapp, stage_id, is_meta_verified, user_id)
+          VALUES ($1,$2,'whatsapp',true,$3,true,$4) RETURNING *`,
+          [name || phone, phone, firstStage[0]?.id, userId]
+        );
+        lead = inserted.rows[0];
+        console.log(`[WhatsApp u${userId}] Created verified lead for ${phone} from ad conversation`);
+        await attachPending(userId, phone, lead.id); // pull in anything queued before the greeting
+      }
     }
-    const { rows: firstStage } = await q('SELECT id FROM stages WHERE user_id = $1 ORDER BY position LIMIT 1', [userId]);
-    const inserted = await q(
-      `INSERT INTO leads (full_name, phone, source, wants_whatsapp, stage_id, is_meta_verified, user_id)
-      VALUES ($1,$2,'whatsapp',true,$3,true,$4) RETURNING *`,
-      [name || phone, phone, firstStage[0]?.id, userId]
-    );
-    lead = inserted.rows[0];
-    console.log(`[WhatsApp u${userId}] Created verified lead for ${phone} from ad conversation`);
+    if (!lead || !lead.is_meta_verified) {
+      await queuePending(userId, phone, m);
+      console.log(`[WhatsApp u${userId}] Message queued for ${phone} (${fromMe ? 'out' : 'in'})`);
+      return lead || null;
+    }
   }
 
-  if (lead.is_meta_verified) {
-    if (await alreadyStored(userId, wa_message_id)) return lead;
-    await q(
-      `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, media_data, media_mime, created_at, user_id)
-      VALUES ($1,'in','whatsapp',$2,$3,$4,$5,$6,$7)`,
-      [lead.id, body, wa_message_id, media_data || null, media_mime || null, ts || new Date(), userId]
-    );
-    await q('UPDATE leads SET wants_whatsapp = true, updated_at = now() WHERE id = $1', [lead.id]);
-    console.log(`[WhatsApp u${userId}] Message attached to lead ${lead.id}`);
-    return lead;
-  }
-
+  if (await alreadyStored(userId, wa_message_id)) return lead;
   await q(
-    `INSERT INTO pending_messages (phone, body, channel, created_at, user_id) VALUES ($1, $2, 'whatsapp', $3, $4)`,
-    [phone, body, ts || new Date(), userId]
+    `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, media_data, media_mime, meta, created_at, user_id)
+    VALUES ($1,$2,'whatsapp',$3,$4,$5,$6,$7,$8,$9)`,
+    [lead.id, fromMe ? 'out' : 'in', body, wa_message_id, media_data || null, media_mime || null,
+     meta ? JSON.stringify(meta) : null, ts || new Date(), userId]
   );
-  console.log(`[WhatsApp u${userId}] Message queued in pending_messages for ${phone}`);
-  return lead || null;
+  if (meta?.ad_reply) await captureAdReferral(userId, lead.id, meta.ad_reply);
+  await q(
+    `UPDATE leads SET wants_whatsapp = true, updated_at = now()${fromMe ? ', last_contacted_at = now()' : ''} WHERE id = $1`,
+    [lead.id]
+  );
+  console.log(`[WhatsApp u${userId}] ${fromMe ? 'out' : 'in'} message attached to lead ${lead.id}`);
+  return lead;
 }
 
 async function ingestHistoryBatch(userId, items) {
@@ -101,13 +135,15 @@ async function ingestHistoryBatch(userId, items) {
       const phone = normalisePhone(item.from);
       const { rows } = await q('SELECT * FROM leads WHERE phone = $1 AND user_id = $2 ORDER BY created_at ASC LIMIT 1', [phone, userId]);
       const lead = rows[0];
-      if (!lead || !lead.is_meta_verified) continue;
+      if (!lead || !lead.is_meta_verified) continue; // never import non-lead (personal) chats
       if (await alreadyStored(userId, item.wa_message_id)) continue;
       await q(
-        `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, media_data, media_mime, created_at, user_id)
-        VALUES ($1,$2,'whatsapp',$3,$4,$5,$6,$7,$8)`,
-        [lead.id, item.fromMe ? 'out' : 'in', item.body, item.wa_message_id, item.media_data || null, item.media_mime || null, item.ts, userId]
+        `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, media_data, media_mime, meta, created_at, user_id)
+        VALUES ($1,$2,'whatsapp',$3,$4,$5,$6,$7,$8,$9)`,
+        [lead.id, item.fromMe ? 'out' : 'in', item.body, item.wa_message_id, item.media_data || null, item.media_mime || null,
+         item.meta ? JSON.stringify(item.meta) : null, item.ts, userId]
       );
+      if (item.meta?.ad_reply) await captureAdReferral(userId, lead.id, item.meta.ad_reply);
       attached++;
     } catch (e) {
       console.error('History backfill failed for one message:', e.message);

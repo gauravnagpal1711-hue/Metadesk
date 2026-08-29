@@ -2,8 +2,9 @@ import express from 'express';
 import { q } from '../db.js';
 import { loadConnection, connConfigured, listLeadForms, fetchFormLeads, flattenLead, normalisePhone } from '../services/meta.js';
 import { sendText, sendMedia, cloudConfigured } from '../services/whatsappCloud.js';
-import { sendWebText, sendWebMedia, webStatus } from '../services/whatsappWeb.js';
+import { sendWebText, sendWebMedia, webStatus, fetchChatHistory } from '../services/whatsappWeb.js';
 import { loadWaConnection } from '../services/waConnection.js';
+import { attachPending } from './whatsapp.js';
 import { suggestReplies, chatProvider } from '../services/ai.js';
 
 export const leadsRouter = express.Router();
@@ -626,6 +627,36 @@ leadsRouter.post('/:id/suggest-replies', async (req, res, next) => {
   }
 });
 
+/**
+ * Ask WhatsApp Web for older messages in this lead's chat. They arrive
+ * asynchronously and attach themselves, so the client should re-fetch the lead
+ * after a second or two.
+ */
+leadsRouter.post('/:id/wa/load-earlier', async (req, res, next) => {
+  try {
+    const uid = req.user.id;
+    const { rows } = await q('SELECT phone FROM leads WHERE id=$1 AND user_id=$2', [req.params.id, uid]);
+    if (!rows.length) return res.status(404).json({ error: 'Lead not found.' });
+    const phone = rows[0].phone;
+    if (!phone) return res.status(400).json({ error: 'This lead has no phone number.' });
+    if (webStatus(uid).status !== 'connected') return res.status(400).json({ error: 'WhatsApp Web is not connected.' });
+
+    const { rows: oldest } = await q(
+      `SELECT wa_message_id, direction, created_at FROM messages
+       WHERE lead_id=$1 AND user_id=$2 AND channel='whatsapp' AND wa_message_id IS NOT NULL
+       ORDER BY created_at ASC LIMIT 1`,
+      [req.params.id, uid]
+    );
+    const anchor = oldest[0]
+      ? { id: oldest[0].wa_message_id, fromMe: oldest[0].direction === 'out', ts: Math.floor(new Date(oldest[0].created_at).getTime() / 1000) }
+      : null;
+    await fetchChatHistory(uid, phone, anchor, 50);
+    res.json({ ok: true, requested: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 leadsRouter.post('/:id/tasks', async (req, res, next) => {
   try {
     const uid = req.user.id;
@@ -692,21 +723,7 @@ async function createManualLead(userId, { full_name, phone, email, city, stage_i
   }
 
   if (normalizedPhone) {
-    const { rows: pendingMsgs } = await q(
-      `SELECT * FROM pending_messages WHERE phone = $1 AND user_id = $2 ORDER BY created_at ASC`,
-      [normalizedPhone, userId]
-    );
-    if (pendingMsgs.length > 0) {
-      for (const msg of pendingMsgs) {
-        await q(
-          `INSERT INTO messages (lead_id, direction, channel, body, created_at, user_id)
-          VALUES ($1, 'in', $2, $3, $4, $5)`,
-          [lead.id, msg.channel, msg.body, msg.created_at, userId]
-        );
-      }
-      await q(`DELETE FROM pending_messages WHERE phone = $1 AND user_id = $2`, [normalizedPhone, userId]);
-      await q('UPDATE leads SET wants_whatsapp = true, updated_at = now() WHERE id = $1', [lead.id]);
-    }
+    await attachPending(userId, normalizedPhone, lead.id);
   }
 
   return { lead };
@@ -985,19 +1002,7 @@ leadsRouter.post('/meta/sync', async (req, res, next) => {
           [raw.id, flat.phone, uid]
         );
         if (upgradedLeads.length > 0) {
-          const leadId = upgradedLeads[0].id;
-          const { rows: pendingMsgs } = await q(
-            `SELECT * FROM pending_messages WHERE phone = $1 AND user_id = $2 ORDER BY created_at ASC`,
-            [flat.phone, uid]
-          );
-          for (const msg of pendingMsgs) {
-            await q(
-              `INSERT INTO messages (lead_id, direction, channel, body, created_at, user_id)
-              VALUES ($1, 'in', $2, $3, $4, $5)`,
-              [leadId, msg.channel, msg.body, msg.created_at, uid]
-            );
-          }
-          await q(`DELETE FROM pending_messages WHERE phone = $1 AND user_id = $2`, [flat.phone, uid]);
+          await attachPending(uid, flat.phone, upgradedLeads[0].id);
         }
       }
     }
