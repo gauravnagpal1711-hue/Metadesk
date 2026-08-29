@@ -6,6 +6,9 @@ export default function Connect({ onConnectionChange }) {
   const [settings, setSettings] = useState({ onlyExistingLeads: false, adGreetingPatterns: [] });
   const [patternsDraft, setPatternsDraft] = useState('');
   const [savingPatterns, setSavingPatterns] = useState(false);
+  const [cloud, setCloud] = useState(null); // { phoneNumberId, verifyToken, hasToken, webhookUrl }
+  const [cloudDraft, setCloudDraft] = useState({ phoneNumberId: '', token: '', verifyToken: '' });
+  const [savingCloud, setSavingCloud] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const poll = useRef(null);
@@ -24,6 +27,10 @@ export default function Connect({ onConnectionChange }) {
     api.get('/whatsapp/settings').then((s) => {
       setSettings(s);
       setPatternsDraft((s.adGreetingPatterns || []).join('\n'));
+    }).catch(() => {});
+    api.get('/whatsapp/cloud').then((c) => {
+      setCloud(c);
+      setCloudDraft({ phoneNumberId: c.phoneNumberId || '', token: '', verifyToken: c.verifyToken || '' });
     }).catch(() => {});
     poll.current = setInterval(refresh, 3000);
     return () => clearInterval(poll.current);
@@ -67,6 +74,33 @@ export default function Connect({ onConnectionChange }) {
       setSettings((s) => ({ ...s, onlyExistingLeads: !next }));
       setError(e.message);
     }
+  }
+
+  async function saveCloud() {
+    setSavingCloud(true);
+    setError('');
+    try {
+      const body = {
+        phoneNumberId: cloudDraft.phoneNumberId.trim(),
+        verifyToken: cloudDraft.verifyToken.trim()
+      };
+      if (cloudDraft.token.trim()) body.token = cloudDraft.token.trim();
+      const updated = await api.patch('/whatsapp/cloud', body);
+      setCloud((c) => ({ ...(c || {}), ...updated }));
+      setCloudDraft((d) => ({ ...d, token: '' }));
+      await refresh();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSavingCloud(false);
+    }
+  }
+
+  function genVerifyToken() {
+    setCloudDraft((d) => ({
+      ...d,
+      verifyToken: (Math.random().toString(36) + Math.random().toString(36)).replace(/[^a-z0-9]/g, '').slice(0, 24)
+    }));
   }
 
   async function savePatterns() {
@@ -138,25 +172,52 @@ export default function Connect({ onConnectionChange }) {
 
         <div className="card">
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <h2 style={{ margin: 0 }}>Cloud API webhook</h2>
+            <h2 style={{ margin: 0 }}>Cloud API</h2>
             <span className={`pill-status ${status.cloud.connected ? 'good' : ''}`} style={{ marginLeft: 'auto' }}>
               <span className="dot" />{status.cloud.connected ? 'Connected' : 'Not connected'}
             </span>
           </div>
           <p style={{ color: 'var(--muted)', marginTop: 8, fontSize: 12.5 }}>
-            Alternative to QR pairing. Incoming messages match existing leads by phone only.
+            Alternative to QR pairing — your own WhatsApp Business number via Meta&apos;s Cloud API.
+            Enter the credentials from Meta for Developers below; nothing goes in Railway.
           </p>
 
           <div className="field" style={{ marginTop: 14 }}>
-            <label htmlFor="cb">Callback URL</label>
-            <input id="cb" className="input num" readOnly value={`${origin}${status.cloud.webhookPath}`} />
-          </div>
-          <div className="field">
-            <label htmlFor="vt">Verify token</label>
-            <input id="vt" className="input num" readOnly value="value of WA_VERIFY_TOKEN" />
+            <label htmlFor="cb">Callback URL (paste into Meta)</label>
+            <input id="cb" className="input num" readOnly onFocus={(e) => e.target.select()}
+              value={`${origin}${cloud?.webhookUrl || status.cloud.webhookPath}`} />
           </div>
 
-          <div className="provider-row">
+          <div className="field">
+            <label htmlFor="wpn">Phone number ID</label>
+            <input id="wpn" className="input num" placeholder="e.g. 1036363452890512"
+              value={cloudDraft.phoneNumberId}
+              onChange={(e) => setCloudDraft((d) => ({ ...d, phoneNumberId: e.target.value }))} />
+          </div>
+
+          <div className="field">
+            <label htmlFor="wtok">Access token</label>
+            <input id="wtok" className="input num" type="password"
+              placeholder={cloud?.hasToken ? '•••••••• saved — leave blank to keep' : 'Permanent token from Meta'}
+              value={cloudDraft.token}
+              onChange={(e) => setCloudDraft((d) => ({ ...d, token: e.target.value }))} />
+          </div>
+
+          <div className="field">
+            <label htmlFor="wvt">Verify token (paste into Meta)</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input id="wvt" className="input num" style={{ flex: 1 }}
+                value={cloudDraft.verifyToken}
+                onChange={(e) => setCloudDraft((d) => ({ ...d, verifyToken: e.target.value }))} />
+              <button type="button" className="btn sm" onClick={genVerifyToken}>Generate</button>
+            </div>
+          </div>
+
+          <button className="btn primary" onClick={saveCloud} disabled={savingCloud}>
+            {savingCloud ? 'Saving…' : 'Save Cloud API details'}
+          </button>
+
+          <div className="provider-row" style={{ marginTop: 16 }}>
             <span style={{ fontSize: 12.5, color: 'var(--muted-3)' }}>Only message existing leads</span>
             <button
               type="button"
@@ -170,9 +231,8 @@ export default function Connect({ onConnectionChange }) {
           </div>
 
           <ol className="steps" style={{ marginTop: 16 }}>
-            <li>In Meta for Developers, open your app → WhatsApp → Configuration.</li>
-            <li>Paste the callback URL and verify token above, then subscribe to the messages field.</li>
-            <li>Set WA_PHONE_NUMBER_ID and WA_TOKEN in Railway and redeploy.</li>
+            <li>In Meta for Developers, open your app → WhatsApp → API Setup — copy the Phone number ID and a permanent access token.</li>
+            <li>Save them here, then in WhatsApp → Configuration paste the callback URL and verify token above and subscribe to the <code>messages</code> field.</li>
           </ol>
         </div>
       </div>
