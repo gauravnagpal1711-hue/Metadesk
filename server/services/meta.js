@@ -575,16 +575,20 @@ export async function createLeadForm(conn, spec = {}) {
   try {
     res = await graph(`${pageId}/leadgen_forms`, { conn, method: 'POST', form: body, token: conn.pageToken });
   } catch (err) {
-    // One-off diagnostic: ask Meta, with the very token we just used, what this
-    // page token can actually do and whether it sees the lead terms as accepted.
+    // One-off diagnostic: with the very tokens we used, ask Meta what the page
+    // token can do, what tasks the user holds on the page, and whether the lead
+    // terms read as accepted from here.
     try {
-      const [perms, pageChk] = await Promise.all([
-        graph('me/permissions', { token: conn.pageToken }).catch((e) => ({ error: e.message })),
-        graph(pageId, { token: conn.pageToken, params: { fields: 'name,leadgen_tos_accepted,tasks' } }).catch((e) => ({ error: e.message }))
+      const [pageChk, accounts, dbg] = await Promise.all([
+        graph(pageId, { token: conn.pageToken, params: { fields: 'name,leadgen_tos_accepted' } }).catch((e) => ({ error: e.message })),
+        graph('me/accounts', { token: conn.accessToken, params: { fields: 'id,name,tasks' } }).catch((e) => ({ error: e.message })),
+        graph('debug_token', { token: conn.accessToken, params: { input_token: conn.pageToken } }).catch((e) => ({ error: e.message }))
       ]);
-      const granted = (perms.data || []).filter((p) => p.status === 'granted').map((p) => p.permission);
+      const thisPage = (accounts.data || []).find((p) => String(p.id) === String(pageId)) || accounts.error || 'page not in me/accounts';
+      const scopes = dbg?.data?.scopes || dbg?.error || dbg;
       console.error('leadgen diagnostic | page:', JSON.stringify(pageChk),
-        '| token perms:', granted.join(',') || JSON.stringify(perms),
+        '| user tasks on page:', JSON.stringify(thisPage),
+        '| page-token scopes:', JSON.stringify(scopes),
         '| form keys:', Object.keys(body).join(','));
     } catch (d) {
       console.error('leadgen diagnostic failed:', d.message);
