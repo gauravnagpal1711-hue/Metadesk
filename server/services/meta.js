@@ -286,7 +286,10 @@ export async function createCampaign(conn, { name, objective }) {
       name,
       objective: objective || 'OUTCOME_LEADS',
       status: 'PAUSED',
-      special_ad_categories: []
+      special_ad_categories: [],
+      // Budget lives on the ad set (no campaign budget), so Meta requires this
+      // flag to be explicit. false = each ad set keeps its own budget.
+      is_adset_budget_sharing_enabled: false
     }
   });
 }
