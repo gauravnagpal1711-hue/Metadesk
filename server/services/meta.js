@@ -312,6 +312,9 @@ export async function createAdSet(conn, {
   if (bidCapRupees) {
     body.bid_amount = Math.round(Number(bidCapRupees) * 100);
     body.bid_strategy = 'LOWEST_COST_WITH_BID_CAP';
+  } else {
+    // Automatic bidding, no cap — otherwise Meta demands a bid amount.
+    body.bid_strategy = 'LOWEST_COST_WITHOUT_CAP';
   }
   if (startAt) body.start_time = new Date(startAt).toISOString();
   if (endAt) body.end_time = new Date(endAt).toISOString();
