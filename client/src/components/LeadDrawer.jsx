@@ -186,15 +186,23 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
     }
   }
 
-  async function loadEarlier() {
+  async function loadEarlier(mode) {
     setLoadingEarlier(true);
     setError('');
+    const before = data?.messages?.length || 0;
     try {
-      await api.post(`/leads/${leadId}/wa/load-earlier`);
-      // The phone sends older messages back asynchronously; re-fetch a few times.
-      for (let i = 0; i < 5; i++) {
+      await api.post(`/leads/${leadId}/wa/load-earlier${mode === 'back' ? '?mode=back' : ''}`);
+      // The phone sends the messages back asynchronously; re-fetch a few times.
+      let after = before;
+      for (let i = 0; i < 6; i++) {
         await new Promise((r) => setTimeout(r, 1500));
-        await load();
+        const fresh = await api.get(`/leads/${leadId}`);
+        setData(fresh);
+        after = fresh.messages.length;
+        if (after > before) break;
+      }
+      if (after === before) {
+        setError('Nothing more came back from the phone for this chat. Try "Load older" for messages further back.');
       }
     } catch (e) {
       setError(e.message);
@@ -488,9 +496,12 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
             <>
               {lead.ad_referral && <AdCard ad={lead.ad_referral} />}
 
-              <div style={{ textAlign: 'center', margin: '2px 0 8px' }}>
-                <button className="btn ghost sm" onClick={loadEarlier} disabled={loadingEarlier}>
-                  {loadingEarlier ? 'Loading earlier messages…' : 'Load earlier messages'}
+              <div style={{ textAlign: 'center', margin: '2px 0 8px', display: 'flex', gap: 6, justifyContent: 'center' }}>
+                <button className="btn ghost sm" onClick={() => loadEarlier()} disabled={loadingEarlier}>
+                  {loadingEarlier ? 'Syncing from phone…' : 'Sync this chat'}
+                </button>
+                <button className="btn ghost sm" onClick={() => loadEarlier('back')} disabled={loadingEarlier}>
+                  Load older
                 </button>
               </div>
 

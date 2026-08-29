@@ -311,9 +311,12 @@ export async function startWeb(userId) {
   });
 
   sock.ev.on('messaging-history.set', async ({ messages, isLatest, syncType }) => {
+    const onDemand = syncType === 3 || syncType === 'ON_DEMAND';
     const batch = (await Promise.all((messages || []).map(extractMessage))).filter(Boolean);
+    if (onDemand || batch.length) {
+      console.log(`[WhatsApp u${userId}] History ${onDemand ? '(on-demand) ' : ''}raw=${(messages || []).length} usable=${batch.length}${isLatest ? ' (final)' : ''}`);
+    }
     if (batch.length === 0) return;
-    console.log(`[WhatsApp u${userId}] History ${syncType === 3 || syncType === 'ON_DEMAND' ? '(on-demand) ' : ''}${batch.length} msgs${isLatest ? ' (final)' : ''}`);
     await onHistory(userId, batch).catch((e) => console.error('History sync handler failed:', e.message));
   });
 
@@ -335,9 +338,11 @@ export async function startAllWebSessions(userIds) {
 }
 
 /**
- * Ask the phone for older messages in one chat. Results arrive asynchronously on
- * the 'messaging-history.set' event and flow through onHistory(). `anchor` is the
- * oldest message we already have: { id, fromMe, ts (unix seconds) }.
+ * Ask the phone for messages in one chat that come BEFORE `anchor`. Results
+ * arrive asynchronously on 'messaging-history.set' and flow through onHistory().
+ * `anchor` = a message we already have: { id, fromMe, tsMs (unix milliseconds) }.
+ * Anchor on the NEWEST message to backfill gaps up to now; anchor on the oldest
+ * to page further back.
  */
 export async function fetchChatHistory(userId, phone, anchor, count = 50) {
   const s = sessions.get(userId);
@@ -345,9 +350,10 @@ export async function fetchChatHistory(userId, phone, anchor, count = 50) {
   if (!s.sock.fetchMessageHistory) throw new Error('This WhatsApp version cannot fetch older messages.');
   const jid = `${String(phone).replace(/\D/g, '')}@s.whatsapp.net`;
   const key = { remoteJid: jid, id: anchor?.id || undefined, fromMe: !!anchor?.fromMe };
-  const ts = anchor?.ts ? Number(anchor.ts) : Math.floor(Date.now() / 1000);
-  await s.sock.fetchMessageHistory(Math.min(count, 50), key, ts);
-  return { requested: true };
+  const tsMs = anchor?.tsMs ? Number(anchor.tsMs) : Date.now();
+  console.log(`[WhatsApp u${userId}] fetchMessageHistory count=${count} chat=${jid} beforeId=${key.id} beforeTs=${tsMs}`);
+  const res = await s.sock.fetchMessageHistory(Math.min(count, 50), key, tsMs);
+  return { requested: true, ref: res || null };
 }
 
 export async function sendWebText(userId, phone, body) {

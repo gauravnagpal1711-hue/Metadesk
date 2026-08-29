@@ -639,19 +639,25 @@ leadsRouter.post('/:id/wa/load-earlier', async (req, res, next) => {
     if (!rows.length) return res.status(404).json({ error: 'Lead not found.' });
     const phone = rows[0].phone;
     if (!phone) return res.status(400).json({ error: 'This lead has no phone number.' });
-    if (webStatus(uid).status !== 'connected') return res.status(400).json({ error: 'WhatsApp Web is not connected.' });
+    if (webStatus(uid).status !== 'connected') return res.status(400).json({ error: 'WhatsApp Web is not connected — pair it in the WhatsApp tab.' });
 
-    const { rows: oldest } = await q(
-      `SELECT wa_message_id, direction, created_at FROM messages
+    // 'back' pages older than the oldest we have; default fills the gap between
+    // the oldest and newest stored message (anchor on the newest, fetch before it).
+    const dir = req.query.mode === 'back' ? 'ASC' : 'DESC';
+    const { rows: anchorRows } = await q(
+      `SELECT wa_message_id, direction, created_at,
+              (SELECT count(*)::int FROM messages WHERE lead_id=$1 AND user_id=$2) AS total
+       FROM messages
        WHERE lead_id=$1 AND user_id=$2 AND channel='whatsapp' AND wa_message_id IS NOT NULL
-       ORDER BY created_at ASC LIMIT 1`,
+       ORDER BY created_at ${dir} LIMIT 1`,
       [req.params.id, uid]
     );
-    const anchor = oldest[0]
-      ? { id: oldest[0].wa_message_id, fromMe: oldest[0].direction === 'out', ts: Math.floor(new Date(oldest[0].created_at).getTime() / 1000) }
+    const a = anchorRows[0];
+    const anchor = a
+      ? { id: a.wa_message_id, fromMe: a.direction === 'out', tsMs: new Date(a.created_at).getTime() }
       : null;
     await fetchChatHistory(uid, phone, anchor, 50);
-    res.json({ ok: true, requested: true });
+    res.json({ ok: true, requested: true, had: a?.total ?? 0 });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
