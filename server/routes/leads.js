@@ -1,5 +1,6 @@
 import express from 'express';
-import { q } from '../db.js';
+import bcrypt from 'bcryptjs';
+import { q, getSetting, setSetting } from '../db.js';
 import { loadConnection, connConfigured, listLeadForms, fetchFormLeads, flattenLead, normalisePhone } from '../services/meta.js';
 import { sendText, sendMedia, cloudConfigured } from '../services/whatsappCloud.js';
 import { sendWebText, sendWebMedia, webStatus, fetchChatHistory } from '../services/whatsappWeb.js';
@@ -215,6 +216,75 @@ leadsRouter.get('/export.csv', async (req, res, next) => {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="ads-desk-leads-${new Date().toISOString().slice(0, 10)}.csv"`);
     res.send('﻿' + lines.join('\r\n'));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ---------------------------------------------------------------------------
+ * Cross-tenant lead export (Excel), gated by a per-user export key.
+ *
+ * NOTE: this is deliberately NOT scoped to req.user.id — it returns EVERY
+ * account's leads. Any logged-in user who sets a key can run it. The first key
+ * a user submits becomes theirs (bcrypt-hashed in settings.export_key_hash);
+ * every export after that must match it. To reset a forgotten key, delete that
+ * user's `export_key_hash` row from the settings table.
+ * ------------------------------------------------------------------------- */
+
+leadsRouter.get('/export/status', async (req, res, next) => {
+  try {
+    const hash = await getSetting(req.user.id, 'export_key_hash', null);
+    res.json({ keySet: Boolean(hash) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+leadsRouter.post('/export/all', async (req, res, next) => {
+  try {
+    const key = String(req.body?.key || '');
+    const hash = await getSetting(req.user.id, 'export_key_hash', null);
+    if (!hash) {
+      if (key.length < 6) return res.status(400).json({ error: 'Set an export key of at least 6 characters.' });
+      await setSetting(req.user.id, 'export_key_hash', bcrypt.hashSync(key, 10));
+    } else if (!bcrypt.compareSync(key, hash)) {
+      return res.status(403).json({ error: 'Wrong export key.' });
+    }
+
+    const { rows } = await q(
+      `SELECT u.username AS account, u.business_name AS business,
+              l.id, l.full_name AS name, l.phone, l.email, l.city,
+              l.campaign_name AS campaign, s.name AS stage, l.value, l.tags,
+              l.source, l.is_meta_verified, l.created_at, l.last_contacted_at,
+              l.appointment_date, l.followup_date, l.lost_reason, l.custom_fields
+       FROM leads l
+       LEFT JOIN stages s ON s.id = l.stage_id
+       LEFT JOIN users u ON u.id = l.user_id
+       ORDER BY l.user_id, l.created_at DESC`
+    );
+
+    const iso = (v) => (v ? new Date(v).toISOString() : '');
+    const out = rows.map((r) => ({
+      Account: r.account || '',
+      Business: r.business || '',
+      Name: r.name || '',
+      Phone: r.phone || '',
+      Email: r.email || '',
+      City: r.city || '',
+      Campaign: r.campaign || '',
+      Stage: r.stage || '',
+      Value: r.value ?? '',
+      Tags: Array.isArray(r.tags) ? r.tags.join('; ') : '',
+      Source: r.source || '',
+      Verified: r.is_meta_verified ? 'yes' : 'no',
+      Created: iso(r.created_at),
+      'Last contacted': iso(r.last_contacted_at),
+      Appointment: iso(r.appointment_date),
+      Followup: iso(r.followup_date),
+      'Lost reason': r.lost_reason || '',
+      'Custom fields': r.custom_fields ? JSON.stringify(r.custom_fields) : ''
+    }));
+    res.json({ rows: out, count: out.length });
   } catch (e) {
     next(e);
   }

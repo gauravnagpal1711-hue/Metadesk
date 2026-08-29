@@ -140,6 +140,34 @@ export default function LeadTable({ filters, query, stages, onOpenLead, reloadSi
     document.body.removeChild(a);
   }
 
+  // Cross-account Excel export, gated by a per-user export key (set on first use).
+  async function exportExcel() {
+    try {
+      const { keySet } = await api.get('/leads/export/status');
+      let key;
+      if (keySet) {
+        key = window.prompt('Enter your export key');
+        if (!key) return;
+      } else {
+        key = window.prompt('First time — set an export key (6+ characters). You will need this exact key for every future export.');
+        if (!key) return;
+        if (window.prompt('Re-enter the key to confirm') !== key) {
+          setError('Keys did not match — export cancelled.');
+          return;
+        }
+      }
+      const { rows } = await api.post('/leads/export/all', { key });
+      if (!rows.length) { setError('No leads to export.'); return; }
+      const XLSX = await import('xlsx');
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'All leads');
+      XLSX.writeFile(wb, `all-leads-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
   const totalPages = Math.max(1, Math.ceil(data.total / PAGE_SIZE));
   const allTags = useMemo(() => {
     const set = new Set();
@@ -177,6 +205,7 @@ export default function LeadTable({ filters, query, stages, onOpenLead, reloadSi
             </>
           )}
           <button className="btn sm" onClick={exportCsv}>Export CSV</button>
+          <button className="btn sm" onClick={exportExcel}>Export Excel (all accounts)</button>
         </div>
       </div>
 
