@@ -575,6 +575,21 @@ export async function createLeadForm(conn, spec = {}) {
   try {
     res = await graph(`${pageId}/leadgen_forms`, { conn, method: 'POST', form: body, token: conn.pageToken });
   } catch (err) {
+    // One-off diagnostic: ask Meta, with the very token we just used, what this
+    // page token can actually do and whether it sees the lead terms as accepted.
+    try {
+      const [perms, pageChk] = await Promise.all([
+        graph('me/permissions', { token: conn.pageToken }).catch((e) => ({ error: e.message })),
+        graph(pageId, { token: conn.pageToken, params: { fields: 'name,leadgen_tos_accepted,tasks' } }).catch((e) => ({ error: e.message }))
+      ]);
+      const granted = (perms.data || []).filter((p) => p.status === 'granted').map((p) => p.permission);
+      console.error('leadgen diagnostic | page:', JSON.stringify(pageChk),
+        '| token perms:', granted.join(',') || JSON.stringify(perms),
+        '| form keys:', Object.keys(body).join(','));
+    } catch (d) {
+      console.error('leadgen diagnostic failed:', d.message);
+    }
+
     const info = explainLeadFormError(err);
     const friendly = new Error(info.message);
     friendly.status = info.status;
