@@ -24,7 +24,6 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [createFor, setCreateFor] = useState(null); // creative id to preselect
   const [editing, setEditing] = useState(null); // a campaign row
-  const [openQuestion, setOpenQuestion] = useState(null); // brief id whose question panel is expanded
   const [briefBusy, setBriefBusy] = useState(null); // brief id currently mutating
 
   useEffect(() => {
@@ -155,13 +154,18 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
       return <button className="btn sm primary" onClick={() => setCampaign(b)}>Set campaign</button>;
     }
     if (b.status === 'queued') {
-      return <span className="sub" style={{ color: 'var(--muted)' }}>Creating on Meta…</span>;
+      // A live launch shows "Working…" (briefBusy, above). A brief left in
+      // 'queued' with no Meta campaign is stuck — let the user run it.
+      return b.meta_campaign_id
+        ? <span className="sub" style={{ color: 'var(--muted)' }}>Creating on Meta…</span>
+        : <button className="btn sm primary" onClick={() => setCampaign(b)}>Create on Meta</button>;
     }
     if (b.status === 'info_needed') {
       return (
-        <button className="btn sm" onClick={() => setOpenQuestion((id) => (id === b.id ? null : b.id))}>
-          {openQuestion === b.id ? 'Hide question' : 'Information needed'}
-        </button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+          {b.notes && <span className="sub" style={{ color: 'var(--bad, #c0392b)' }}>{b.notes}</span>}
+          <button className="btn sm primary" onClick={() => setCampaign(b)}>Retry on Meta</button>
+        </div>
       );
     }
     if (b.status === 'created') {
@@ -228,15 +232,6 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
                         <span className="tag good" style={{ marginLeft: 6 }}>Ads Desk</span>
                       </div>
                       <div className="num" style={{ fontSize: 10.5, color: 'var(--muted-2)', marginTop: 2 }}>brief #{b.id}</div>
-                      {b.status === 'info_needed' && openQuestion === b.id && (
-                        <div className="notice" style={{ margin: '8px 0 2px', borderLeftColor: 'var(--warn)' }}>
-                          <strong>Claude needs to know:</strong>
-                          <div style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>{b.notes || 'Claude has a question — check your Claude Code chat.'}</div>
-                          <div className="sub" style={{ color: 'var(--muted-2)', marginTop: 6 }}>
-                            Answer in your Claude Code chat, then it will continue with <code>create campaign brief #{b.id}</code>.
-                          </div>
-                        </div>
-                      )}
                     </td>
                     <td><span className={`tag ${pill.cls}`}>{pill.text}</span></td>
                     <td className="num" style={{ textAlign: 'right' }}>{b.daily_budget ? `₹${money(b.daily_budget)}` : '—'}</td>
