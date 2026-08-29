@@ -216,6 +216,125 @@ export async function renameObject(conn, objectId, name) {
   return graph(objectId, { conn, method: 'POST', params: { name } });
 }
 
+export async function deleteObject(conn, objectId) {
+  return graph(objectId, { conn, method: 'DELETE' });
+}
+
+/* ---------- creating a campaign from a brief (all PAUSED) ---------- */
+
+const GENDER_CODE = { female: 2, male: 1 };
+
+/** Turn a stored brief.audience blob into a Meta targeting spec. */
+export function buildTargeting(audience = {}) {
+  const t = {
+    age_min: Number(audience.age_min) || 18,
+    age_max: Number(audience.age_max) || 65
+  };
+  const genders = (audience.genders || []).map((g) => GENDER_CODE[g]).filter(Boolean);
+  if (genders.length === 1) t.genders = genders; // omit = all
+
+  if (audience.location_mode === 'cities' && Array.isArray(audience.locations) && audience.locations.length) {
+    t.geo_locations = {
+      cities: audience.locations.map((l) => ({
+        key: String(l.key),
+        radius: Number(l.radius_km) || 10,
+        distance_unit: 'kilometer'
+      }))
+    };
+  } else if (audience.radius_center) {
+    t.geo_locations = {
+      custom_locations: [{
+        latitude: audience.radius_center.lat ?? audience.radius_center.latitude,
+        longitude: audience.radius_center.lng ?? audience.radius_center.longitude,
+        radius: Number(audience.radius_km) || 10,
+        distance_unit: 'kilometer'
+      }]
+    };
+  }
+
+  const interests = (audience.interests || [])
+    .filter((i) => i && i.id)
+    .map((i) => ({ id: String(i.id), name: i.name }));
+  if (interests.length) t.flexible_spec = [{ interests }];
+
+  return t;
+}
+
+export async function createCampaign(conn, { name, objective }) {
+  return graph(`${accountId(conn)}/campaigns`, {
+    conn,
+    method: 'POST',
+    body: {
+      name,
+      objective: objective || 'OUTCOME_LEADS',
+      status: 'PAUSED',
+      special_ad_categories: []
+    }
+  });
+}
+
+/** Click-to-WhatsApp ad set: promoted page, WHATSAPP destination, PAUSED. */
+export async function createAdSet(conn, {
+  name, campaignId, dailyBudgetRupees, optimizationGoal, pageId, targeting, bidCapRupees, startAt, endAt
+}) {
+  const body = {
+    name,
+    campaign_id: campaignId,
+    daily_budget: Math.round(Number(dailyBudgetRupees) * 100),
+    billing_event: 'IMPRESSIONS',
+    optimization_goal: optimizationGoal || 'CONVERSATIONS',
+    destination_type: 'WHATSAPP',
+    promoted_object: { page_id: String(pageId) },
+    targeting,
+    status: 'PAUSED'
+  };
+  if (bidCapRupees) {
+    body.bid_amount = Math.round(Number(bidCapRupees) * 100);
+    body.bid_strategy = 'LOWEST_COST_WITH_BID_CAP';
+  }
+  if (startAt) body.start_time = new Date(startAt).toISOString();
+  if (endAt) body.end_time = new Date(endAt).toISOString();
+  return graph(`${accountId(conn)}/adsets`, { conn, method: 'POST', body });
+}
+
+/** Upload a data-URL image to the ad account, returns its image hash. */
+export async function uploadAdImage(conn, dataUrl) {
+  const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || '');
+  if (!m) throw new Error('The creative has no usable image to upload.');
+  const res = await graph(`${accountId(conn)}/adimages`, { conn, method: 'POST', body: { bytes: m[2] } });
+  const first = res.images && Object.values(res.images)[0];
+  if (!first?.hash) throw new Error('Meta did not return an image hash for the creative.');
+  return first.hash;
+}
+
+/** Click-to-WhatsApp ad creative from the page + uploaded image. */
+export async function createCreative(conn, { name, pageId, message, imageHash, waNumber }) {
+  return graph(`${accountId(conn)}/adcreatives`, {
+    conn,
+    method: 'POST',
+    body: {
+      name,
+      object_story_spec: {
+        page_id: String(pageId),
+        link_data: {
+          message: message || '',
+          image_hash: imageHash,
+          link: `https://api.whatsapp.com/send?phone=${waNumber}`,
+          call_to_action: { type: 'WHATSAPP_MESSAGE', value: { app_destination: 'WHATSAPP' } }
+        }
+      }
+    }
+  });
+}
+
+export async function createAd(conn, { name, adsetId, creativeId }) {
+  return graph(`${accountId(conn)}/ads`, {
+    conn,
+    method: 'POST',
+    body: { name, adset_id: adsetId, creative: { creative_id: creativeId }, status: 'PAUSED' }
+  });
+}
+
 /** Every lead-gen form attached to the page. Uses the page token when we have one. */
 export async function listLeadForms(conn, pageId) {
   const id = pageId || conn?.pageId;

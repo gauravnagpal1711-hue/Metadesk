@@ -1,5 +1,9 @@
 import express from 'express';
 import { q } from '../db.js';
+import {
+  loadConnection, connConfigured, buildTargeting,
+  createCampaign, createAdSet, uploadAdImage, createCreative, createAd, deleteObject
+} from '../services/meta.js';
 
 export const campaignBriefsRouter = express.Router();
 
@@ -219,6 +223,86 @@ campaignBriefsRouter.patch('/:id', async (req, res, next) => {
       ]
     );
     res.json(rows[0]);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Actually build the brief on Meta — campaign + ad set + creative + ad, all
+ * PAUSED — and record the ids. Nothing here ever goes ACTIVE; the user does that
+ * with "Start campaign" (PATCH /campaigns/:id { status: 'ACTIVE' }). On any Meta
+ * error the half-built campaign is deleted and the brief is left 'info_needed'.
+ */
+campaignBriefsRouter.post('/:id/launch', async (req, res, next) => {
+  try {
+    const uid = req.user.id;
+    const { rows } = await q('SELECT * FROM campaign_briefs WHERE id = $1 AND user_id = $2', [req.params.id, uid]);
+    const brief = rows[0];
+    if (!brief) return res.status(404).json({ error: 'Brief not found.' });
+    if (brief.meta_campaign_id) return res.status(400).json({ error: 'This brief is already on Meta.' });
+    if (!brief.creative_id) return res.status(400).json({ error: 'This brief has no creative.' });
+    if (!brief.daily_budget) return res.status(400).json({ error: 'Set a daily budget before launching.' });
+
+    const { rows: cr } = await q(
+      `SELECT ${CREATIVE_FIELDS} FROM creatives WHERE id = $1 AND user_id = $2`,
+      [brief.creative_id, uid]
+    );
+    const creative = cr[0];
+    if (!creative) return res.status(400).json({ error: 'The brief\'s creative no longer exists.' });
+    if (creative.status !== 'approved') return res.status(400).json({ error: 'The creative is not approved yet.' });
+    if (creative.destination_type !== 'whatsapp' || !creative.destination_value) {
+      return res.status(400).json({ error: 'This launcher only handles click-to-WhatsApp creatives for now.' });
+    }
+
+    const conn = await loadConnection(uid);
+    if (!connConfigured(conn)) return res.status(400).json({ error: 'Meta is not connected — open the Facebook tab.' });
+    if (!conn.pageId) return res.status(400).json({ error: 'No Facebook page selected on the Facebook tab.' });
+
+    const audience = brief.audience || {};
+    const targeting = buildTargeting(audience);
+    const waNumber = String(creative.destination_value).replace(/\D/g, '');
+
+    let campaignId, adsetId, imageHash, creativeId, adId;
+    try {
+      ({ id: campaignId } = await createCampaign(conn, { name: brief.name, objective: brief.objective }));
+      ({ id: adsetId } = await createAdSet(conn, {
+        name: `${brief.name} — ad set`,
+        campaignId,
+        dailyBudgetRupees: brief.daily_budget,
+        optimizationGoal: audience.advanced?.optimization_goal,
+        bidCapRupees: audience.advanced?.bid_cap_rupees,
+        pageId: conn.pageId,
+        targeting,
+        startAt: brief.start_at,
+        endAt: brief.end_at
+      }));
+      imageHash = await uploadAdImage(conn, creative.image_data);
+      ({ id: creativeId } = await createCreative(conn, {
+        name: `${brief.name} — creative`,
+        pageId: conn.pageId,
+        message: creative.primary_text || creative.headline || '',
+        imageHash,
+        waNumber
+      }));
+      ({ id: adId } = await createAd(conn, { name: `${brief.name} — ad`, adsetId, creativeId }));
+    } catch (metaErr) {
+      if (campaignId) await deleteObject(conn, campaignId).catch(() => {});
+      await q(
+        "UPDATE campaign_briefs SET status = 'info_needed', notes = $2, updated_at = now() WHERE id = $1",
+        [brief.id, `Meta rejected the launch: ${metaErr.message}`]
+      );
+      return res.status(502).json({ error: `Meta rejected the launch: ${metaErr.message}` });
+    }
+
+    const { rows: upd } = await q(
+      `UPDATE campaign_briefs SET
+         meta_campaign_id = $2, meta_adset_id = $3, meta_creative_id = $4,
+         meta_ad_id = $5, meta_image_hash = $6, status = 'created', updated_at = now()
+       WHERE id = $1 AND user_id = $7 RETURNING *`,
+      [brief.id, campaignId, adsetId, creativeId, adId, imageHash, uid]
+    );
+    res.json(upd[0]);
   } catch (e) {
     next(e);
   }

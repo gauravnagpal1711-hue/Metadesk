@@ -67,16 +67,29 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
     } catch (e) { setError(e.message); }
   }
 
-  // "Set campaign" — hand a ready brief to Claude. No Meta call here.
+  // "Set campaign" — build the brief on Meta now, all PAUSED.
   async function setCampaign(brief) {
-    if (!window.confirm(`Send "${brief.name}" to Claude to build on Meta? It stays paused until you start it.`)) return;
+    if (!window.confirm(`Create "${brief.name}" on Meta now? It is created PAUSED — nothing spends until you press "Start campaign".`)) return;
     setBriefBusy(brief.id);
     setError('');
+    setNotice('');
     try {
-      const updated = await api.patch(`/campaign-briefs/${brief.id}`, { status: 'queued' });
-      replaceBrief(updated);
-      setNotice(`"${brief.name}" is queued. Tell Claude: create campaign brief #${brief.id}`);
-    } catch (e) { setError(e.message); } finally { setBriefBusy(null); }
+      // Flip to 'queued' first so the pill reads "Setup in Process" while Meta works.
+      replaceBrief(await api.patch(`/campaign-briefs/${brief.id}`, { status: 'queued' }));
+      const created = await api.post(`/campaign-briefs/${brief.id}/launch`);
+      replaceBrief(created);
+      setNotice(`"${brief.name}" is created on Meta and paused. Press "Start campaign" when you want it live.`);
+      sync(); // pull the new paused campaign into the table below
+    } catch (e) {
+      setError(e.message);
+      // Reflect whatever status the server left the brief in (info_needed on failure).
+      try {
+        const fresh = await api.get(`/campaign-briefs/${brief.id}`);
+        replaceBrief(fresh);
+      } catch { /* ignore */ }
+    } finally {
+      setBriefBusy(null);
+    }
   }
 
   // "Start campaign" — only for a brief Claude has already created (paused) on Meta.
@@ -142,7 +155,7 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
       return <button className="btn sm primary" onClick={() => setCampaign(b)}>Set campaign</button>;
     }
     if (b.status === 'queued') {
-      return <span className="sub" style={{ color: 'var(--muted)' }}>Claude is building it…</span>;
+      return <span className="sub" style={{ color: 'var(--muted)' }}>Creating on Meta…</span>;
     }
     if (b.status === 'info_needed') {
       return (
