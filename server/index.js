@@ -67,12 +67,10 @@ app.use((err, req, res, next) => {
 /* ---------- background sync ---------- */
 
 async function syncEverything() {
-  // Every user who has connected a Meta account, plus the first user if the
-  // legacy env-var connection is in play.
+  // Every user who has an access token stored in meta_connections.
   const { rows: connectedUsers } = await q(
     `SELECT u.id FROM users u
-     WHERE EXISTS (SELECT 1 FROM meta_connections m WHERE m.user_id = u.id AND m.access_token IS NOT NULL)
-        OR u.id = (SELECT id FROM users ORDER BY id LIMIT 1)`
+     WHERE EXISTS (SELECT 1 FROM meta_connections m WHERE m.user_id = u.id AND m.access_token IS NOT NULL)`
   );
   for (const { id: uid } of connectedUsers) {
     await syncTenant(uid).catch((e) => console.error(`Sync failed for user ${uid}:`, e.message));
@@ -104,7 +102,7 @@ async function syncTenant(uid) {
     console.error('Campaign sync failed:', e.message);
   }
 
-  const pageId = conn.pageId || process.env.META_PAGE_ID;
+  const pageId = conn.pageId;
   if (!pageId) return;
   try {
     const forms = await listLeadForms(conn, pageId);

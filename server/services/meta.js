@@ -3,8 +3,7 @@
  *
  * Each user connects their own Facebook account. The connection (token + ad
  * account + page) lives in the `meta_connections` table, one row per user, and
- * is loaded with loadConnection(userId). The old env vars (META_ACCESS_TOKEN
- * etc.) are still honoured as a fallback for the first user only.
+ * is loaded with loadConnection(userId).
  *
  * Every Graph call takes an explicit `conn` object so nothing is shared between
  * tenants.
@@ -17,20 +16,6 @@ const WA_SETTING_KEY = 'campaign_wa_number';
 const SHOP_LOCATION_KEY = 'shop_location';
 
 /* ---------- connection storage (per user) ---------- */
-
-function envConnection() {
-  if (!process.env.META_ACCESS_TOKEN && !process.env.META_AD_ACCOUNT_ID) return null;
-  return {
-    accessToken: process.env.META_ACCESS_TOKEN || null,
-    adAccountId: process.env.META_AD_ACCOUNT_ID || null,
-    pageId: process.env.META_PAGE_ID || null,
-    pageToken: null,
-    name: null,
-    fbUserId: null,
-    connectedAt: null,
-    fromEnv: true
-  };
-}
 
 function rowToConn(r) {
   if (!r) return null;
@@ -51,16 +36,17 @@ const EMPTY_CONN = {
   name: null, fbUserId: null, connectedAt: null, expiresAt: null
 };
 
-/** Load a user's Meta connection. Falls back to env vars for the first user. */
+/**
+ * Load a user's Meta connection from the meta_connections table.
+ * One row per tenant; no row means "not connected" (an explicit disconnect,
+ * or never connected). The legacy env-var fallback for the first user was
+ * removed — it made Disconnect impossible to persist while META_ACCESS_TOKEN
+ * lingered in the environment.
+ */
 export async function loadConnection(userId) {
   if (!userId) return { ...EMPTY_CONN };
   const { rows } = await q('SELECT * FROM meta_connections WHERE user_id = $1', [userId]);
   if (rows.length) return rowToConn(rows[0]);
-  const { rows: firstU } = await q('SELECT id FROM users ORDER BY id LIMIT 1');
-  if (firstU[0]?.id === userId) {
-    const env = envConnection();
-    if (env) return env;
-  }
   return { ...EMPTY_CONN };
 }
 
