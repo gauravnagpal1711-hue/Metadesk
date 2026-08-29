@@ -24,15 +24,41 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
   const [newForm, setNewForm] = useState(null); // null = closed; object = builder open
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [pageInfo, setPageInfo] = useState(null); // { page_id, page_name, leadgen_tos_accepted }
+  const [tosNeeded, setTosNeeded] = useState(false); // forced on when Meta rejects for terms
+  const [tosBusy, setTosBusy] = useState(false);
+
+  const loadPageInfo = () => api.get('/meta/page').then(setPageInfo).catch(() => {});
 
   useEffect(() => {
     if (!open) return undefined;
     api.get('/meta/whatsapp-number').then((r) => setWaNumber(r.number || null)).catch(() => {});
     api.get('/meta/lead-forms').then((r) => setForms(Array.isArray(r) ? r : [])).catch(() => {});
+    loadPageInfo();
     const onKey = (e) => e.key === 'Escape' && setOpen(false);
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
+
+  // Open Meta's Lead Ads terms in a popup (same pattern as Facebook login), then
+  // re-check acceptance when it closes. Never leaves the app tab.
+  function openTosPopup() {
+    const pid = pageInfo?.page_id;
+    if (!pid) { setError('Connect a Facebook page first (Facebook tab).'); return; }
+    setTosBusy(true);
+    const w = window.open(
+      `https://www.facebook.com/ads/leadgen/tos/?page_id=${pid}`,
+      'fb-lead-tos', 'width=680,height=760'
+    );
+    const timer = setInterval(async () => {
+      if (!w || w.closed) {
+        clearInterval(timer);
+        await loadPageInfo();
+        setTosNeeded(false);
+        setTosBusy(false);
+      }
+    }, 1000);
+  }
 
   function pickDest(t) {
     setDestType(t);
@@ -85,8 +111,10 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
       setForms((fs) => [{ id: created.id, name: created.name, fields: newForm.fields }, ...fs]);
       setDestValue(created.id);
       setNewForm(null);
+      setTosNeeded(false);
     } catch (e) {
       setError(e.message);
+      if (e.data?.needs_tos) setTosNeeded(true);
     } finally {
       setBusy(false);
     }
@@ -219,6 +247,19 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
             <label>Privacy policy link (required by Meta)</label>
             <input className="input" placeholder="https://your-site.com/privacy — or leave blank" value={newForm.privacy_url} onChange={(e) => setNewForm((s) => ({ ...s, privacy_url: e.target.value }))} />
           </div>
+
+          {(pageInfo?.leadgen_tos_accepted === false || tosNeeded) && (
+            <div className="notice" style={{ margin: 0 }}>
+              <div style={{ fontSize: 13, marginBottom: 6 }}>
+                Meta needs you to accept the Lead Ads terms before a form can be created.
+                A window opens — accept for <strong>both your profile and your Page</strong>, then come back.
+              </div>
+              <button className="btn sm" onClick={openTosPopup} disabled={tosBusy}>
+                {tosBusy ? 'Waiting for Meta…' : 'Accept Lead Ads terms'}
+              </button>
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn primary sm" onClick={createForm} disabled={busy}>{busy ? 'Creating…' : 'Create form'}</button>
             <button className="btn ghost sm" onClick={() => setNewForm(null)}>Cancel</button>

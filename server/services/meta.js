@@ -494,6 +494,36 @@ export async function getPageInfo(conn) {
 
 const QUESTION_TYPE = { name: 'FULL_NAME', phone: 'PHONE', email: 'EMAIL', city: 'CITY' };
 
+/**
+ * Turn a raw Graph failure from POST /leadgen_forms into something a shopkeeper
+ * can act on. Meta almost always answers with a bare `code 1` OAuthException
+ * ("An unknown error has occurred.") for the two real blockers — Lead Ads terms
+ * not accepted, or the app not being Live — so we spell both out and flag when
+ * the client should show the "Accept Lead Ads terms" button.
+ */
+function explainLeadFormError(err) {
+  const e = err?.metaError || {};
+  const raw = String(e.message || err?.message || '');
+  const fbtrace = e.fbtrace_id || null;
+  const ref = fbtrace ? ` (ref ${fbtrace})` : '';
+  const has = (s) => raw.toLowerCase().includes(s);
+
+  if (e.error_subcode === 1885183 || has('development mode') || has('must be in public')) {
+    return { status: 502, needs_tos: false, fbtrace,
+      message: `The Ads Desk app is still in development mode on Meta, so it can't create live forms yet.${ref}` };
+  }
+  if (has('permission') || e.code === 200 || e.code === 10) {
+    return { status: 403, needs_tos: false, fbtrace,
+      message: `The Facebook login is missing permission to manage this Page's forms. Disconnect and reconnect on the Facebook tab and grant every permission.${ref}` };
+  }
+  if (e.type === 'OAuthException' && (e.code === 1 || e.code === 2) && !e.error_subcode) {
+    return { status: 400, needs_tos: true, fbtrace,
+      message: `Meta rejected the form without a reason. Usual causes: Lead Ads terms not accepted for your profile AND your Page (use "Accept Lead Ads terms" below, then wait a minute), or the Ads Desk Meta app isn't Live yet. If you just accepted the terms, try once more.${ref}` };
+  }
+  return { status: 502, needs_tos: false, fbtrace,
+    message: `${e.error_user_msg || e.message || 'Meta could not create the form.'}${ref}` };
+}
+
 /** Create an Instant Form on the connected Page. The one Graph write the app makes. */
 export async function createLeadForm(conn, spec = {}) {
   const pageId = conn?.pageId;
@@ -530,7 +560,18 @@ export async function createLeadForm(conn, spec = {}) {
     }
   };
 
-  const res = await graph(`${pageId}/leadgen_forms`, { conn, method: 'POST', body, token: conn.pageToken });
+  let res;
+  try {
+    res = await graph(`${pageId}/leadgen_forms`, { conn, method: 'POST', body, token: conn.pageToken });
+  } catch (err) {
+    const info = explainLeadFormError(err);
+    const friendly = new Error(info.message);
+    friendly.status = info.status;
+    friendly.needsTos = info.needs_tos;
+    friendly.fbtrace = info.fbtrace;
+    console.error('createLeadForm failed:', info.message, '| raw:', err?.metaError || err?.message);
+    throw friendly;
+  }
   return { id: res.id, name: body.name };
 }
 

@@ -118,6 +118,11 @@ metaTargetingRouter.post('/lead-forms', async (req, res, next) => {
   try {
     res.json(await createLeadForm(await loadConnection(req.user.id), req.body || {}));
   } catch (e) {
+    // createLeadForm throws an Error tagged with status/needsTos/fbtrace for
+    // known Meta blockers; anything else falls through to the generic handler.
+    if (e && e.status) {
+      return res.status(e.status).json({ error: e.message, needs_tos: !!e.needsTos, fbtrace: e.fbtrace || null });
+    }
     next(e);
   }
 });
