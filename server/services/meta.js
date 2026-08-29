@@ -135,7 +135,22 @@ async function graph(pathname, { method = 'GET', params = {}, body, token, conn 
   const res = await fetch(url, init);
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(json?.error?.message || `Meta API returned ${res.status}`);
+    const e = json?.error || {};
+    let fields;
+    try {
+      const bfs = typeof e.error_data === 'string' ? JSON.parse(e.error_data) : e.error_data;
+      const spec = bfs?.blame_field_specs || e.error_data?.blame_field_specs;
+      if (Array.isArray(spec)) fields = spec.flat().filter(Boolean).join(', ');
+    } catch { /* ignore */ }
+    const msg = [
+      e.message || `Meta API returned ${res.status}`,
+      e.error_user_msg && e.error_user_msg !== e.message ? `— ${e.error_user_msg}` : null,
+      e.error_subcode ? `(subcode ${e.error_subcode})` : null,
+      fields ? `[field: ${fields}]` : null
+    ].filter(Boolean).join(' ');
+    const err = new Error(msg);
+    err.metaError = e;
+    throw err;
   }
   return json;
 }
@@ -235,11 +250,14 @@ export function buildTargeting(audience = {}) {
 
   if (audience.location_mode === 'cities' && Array.isArray(audience.locations) && audience.locations.length) {
     t.geo_locations = {
-      cities: audience.locations.map((l) => ({
-        key: String(l.key),
-        radius: Number(l.radius_km) || 10,
-        distance_unit: 'kilometer'
-      }))
+      cities: audience.locations.map((l) => {
+        const city = { key: String(l.key) };
+        const r = Number(l.radius_km);
+        // Meta only accepts a city radius of 17–80 km; outside that, omit it and
+        // let Meta use the city's own boundary.
+        if (r >= 17 && r <= 80) { city.radius = r; city.distance_unit = 'kilometer'; }
+        return city;
+      })
     };
   } else if (audience.radius_center) {
     t.geo_locations = {

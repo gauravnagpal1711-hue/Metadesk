@@ -264,8 +264,10 @@ campaignBriefsRouter.post('/:id/launch', async (req, res, next) => {
     const waNumber = String(creative.destination_value).replace(/\D/g, '');
 
     let campaignId, adsetId, imageHash, creativeId, adId;
+    let step = 'campaign';
     try {
       ({ id: campaignId } = await createCampaign(conn, { name: brief.name, objective: brief.objective }));
+      step = 'ad set';
       ({ id: adsetId } = await createAdSet(conn, {
         name: `${brief.name} — ad set`,
         campaignId,
@@ -277,7 +279,9 @@ campaignBriefsRouter.post('/:id/launch', async (req, res, next) => {
         startAt: brief.start_at,
         endAt: brief.end_at
       }));
+      step = 'image upload';
       imageHash = await uploadAdImage(conn, creative.image_data);
+      step = 'creative';
       ({ id: creativeId } = await createCreative(conn, {
         name: `${brief.name} — creative`,
         pageId: conn.pageId,
@@ -285,14 +289,20 @@ campaignBriefsRouter.post('/:id/launch', async (req, res, next) => {
         imageHash,
         waNumber
       }));
+      step = 'ad';
       ({ id: adId } = await createAd(conn, { name: `${brief.name} — ad`, adsetId, creativeId }));
     } catch (metaErr) {
+      console.error(
+        `[brief ${brief.id} launch] failed at "${step}":`,
+        JSON.stringify(metaErr.metaError || { message: metaErr.message })
+      );
       if (campaignId) await deleteObject(conn, campaignId).catch(() => {});
+      const note = `Meta rejected the launch at "${step}": ${metaErr.message}`;
       await q(
         "UPDATE campaign_briefs SET status = 'info_needed', notes = $2, updated_at = now() WHERE id = $1",
-        [brief.id, `Meta rejected the launch: ${metaErr.message}`]
+        [brief.id, note]
       );
-      return res.status(502).json({ error: `Meta rejected the launch: ${metaErr.message}` });
+      return res.status(502).json({ error: note });
     }
 
     const { rows: upd } = await q(
