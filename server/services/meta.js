@@ -104,7 +104,7 @@ function accountId(conn) {
   return id.startsWith('act_') ? id : `act_${id}`;
 }
 
-async function graph(pathname, { method = 'GET', params = {}, body, token, conn } = {}) {
+async function graph(pathname, { method = 'GET', params = {}, body, form, token, conn } = {}) {
   const useToken = token || conn?.accessToken;
   if (!useToken) throw new Error('Meta is not connected. Open the Facebook tab and sign in with Facebook.');
   const url = new URL(`${BASE}/${pathname.replace(/^\//, '')}`);
@@ -114,7 +114,18 @@ async function graph(pathname, { method = 'GET', params = {}, body, token, conn 
   url.searchParams.set('access_token', useToken);
 
   const init = { method, headers: {} };
-  if (body) {
+  if (form) {
+    // Some Graph endpoints (leadgen_forms is the notorious one) reject a nested
+    // JSON body and only accept form-urlencoded params with each nested field as
+    // a JSON string. Failure mode is a contentless code-1 "unknown error".
+    const usp = new URLSearchParams();
+    for (const [k, v] of Object.entries(form)) {
+      if (v === undefined || v === null) continue;
+      usp.set(k, typeof v === 'object' ? JSON.stringify(v) : String(v));
+    }
+    init.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    init.body = usp.toString();
+  } else if (body) {
     init.headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
   }
@@ -562,7 +573,7 @@ export async function createLeadForm(conn, spec = {}) {
 
   let res;
   try {
-    res = await graph(`${pageId}/leadgen_forms`, { conn, method: 'POST', body, token: conn.pageToken });
+    res = await graph(`${pageId}/leadgen_forms`, { conn, method: 'POST', form: body, token: conn.pageToken });
   } catch (err) {
     const info = explainLeadFormError(err);
     const friendly = new Error(info.message);
