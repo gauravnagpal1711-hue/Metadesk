@@ -55,7 +55,10 @@ function vertexAI() {
   return vertexClient;
 }
 
-const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'imagen-4.0-generate-001';
+// The standalone "Imagen" model family isn't in this project's catalog —
+// Gemini's own native image output (generateContent, not generateImages)
+// is what's actually available, confirmed working 2026-09-05.
+const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image';
 const GEMINI_VIDEO_MODEL = process.env.GEMINI_VIDEO_MODEL || 'veo-3.0-generate-001';
 
 export function copyProvider() {
@@ -75,18 +78,18 @@ export async function generateImage(prompt, opts = {}) {
   return replicateImage(prompt, opts);
 }
 
-const IMAGE_ASPECT_RATIOS = { '1024x1024': '1:1', '1024x1536': '9:16', '1536x1024': '16:9' };
+const IMAGE_ASPECT_RATIOS = { '1024x1024': '1:1', '1024x1536': '2:3', '1536x1024': '3:2' };
 
 async function vertexImage(prompt, { size } = {}) {
   const ai = vertexAI();
-  const res = await ai.models.generateImages({
+  const res = await ai.models.generateContent({
     model: GEMINI_IMAGE_MODEL,
-    prompt,
-    config: { numberOfImages: 1, aspectRatio: IMAGE_ASPECT_RATIOS[size] || '1:1', includeRaiReason: true }
+    contents: prompt,
+    config: { imageConfig: { aspectRatio: IMAGE_ASPECT_RATIOS[size] || '1:1' } }
   });
-  const picked = res.generatedImages?.[0];
-  if (!picked?.image?.imageBytes) throw new Error(picked?.raiFilteredReason || 'Gemini returned no image.');
-  return { provider: `vertex:${GEMINI_IMAGE_MODEL}`, dataUrl: `data:${picked.image.mimeType || 'image/png'};base64,${picked.image.imageBytes}` };
+  const part = res.candidates?.[0]?.content?.parts?.find((p) => p.inlineData);
+  if (!part) throw new Error(res.candidates?.[0]?.finishReason || 'Gemini returned no image.');
+  return { provider: `vertex:${GEMINI_IMAGE_MODEL}`, dataUrl: `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}` };
 }
 
 /**
