@@ -13,6 +13,17 @@ const SIZES = [
   { v: '1536x1024', l: 'Landscape 3:2 — right column', ratio: 'horizontal 3:2' }
 ];
 
+const VIDEO_ASPECTS = [
+  { v: '16:9', l: 'Landscape 16:9 — feed, right column' },
+  { v: '9:16', l: 'Portrait 9:16 — story, reels' }
+];
+
+const PROVIDER_LABELS = {
+  openai: ['OpenAI API', 'GPT-IMAGE-1'],
+  replicate: ['Replicate', 'FLUX'],
+  vertex: ['Google Gemini', 'Imagen / Veo (Vertex AI)']
+};
+
 /** Builds a usable image prompt with no API call — this runs entirely in your browser. */
 function buildPrompt({ brief, offer, audience, size, style, textInImage }) {
   const ratio = SIZES.find((s) => s.v === size)?.ratio || 'square 1:1';
@@ -30,7 +41,7 @@ function buildPrompt({ brief, offer, audience, size, style, textInImage }) {
 }
 
 export default function Creative() {
-  const [providers, setProviders] = useState({ image: null, copy: null });
+  const [providers, setProviders] = useState({ image: null, copy: null, video: null });
   const [brief, setBrief] = useState('');
   const [offer, setOffer] = useState('');
   const [audience, setAudience] = useState('');
@@ -38,16 +49,23 @@ export default function Creative() {
   const [style, setStyle] = useState('Bright, premium');
   const [textInImage, setTextInImage] = useState(true);
   const [size, setSize] = useState(SIZES[0].v);
+  const [outputKind, setOutputKind] = useState('image');
+  const [videoAspect, setVideoAspect] = useState(VIDEO_ASPECTS[0].v);
   const [copy, setCopy] = useState({ headline: '', primary_text: '', cta: '', image_prompt: '' });
   const [gallery, setGallery] = useState([]);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
   const fileRef = useRef(null);
+  const pollTimers = useRef({});
 
   useEffect(() => {
     api.get('/creatives/providers').then(setProviders).catch(() => {});
-    api.get('/creatives').then(setGallery).catch(() => {});
+    api.get('/creatives').then((rows) => {
+      setGallery(rows);
+      rows.filter((c) => c.video_status === 'pending').forEach((c) => pollVideoStatus(c.id));
+    }).catch(() => {});
+    return () => Object.values(pollTimers.current).forEach(clearTimeout);
   }, []);
 
   const prompt = copy.image_prompt || buildPrompt({ brief, offer, audience, size, style, textInImage });
@@ -82,6 +100,42 @@ export default function Creative() {
         prompt, size, headline: copy.headline, primary_text: copy.primary_text, cta: copy.cta
       });
       setGallery((g) => [created, ...g]);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy('');
+    }
+  }
+
+  /** Veo generation runs for minutes, not seconds — keep checking in the
+   *  background until the job leaves 'pending', same idea as WhatsApp's
+   *  "load earlier messages" polling. */
+  function pollVideoStatus(id) {
+    const tick = async () => {
+      try {
+        const updated = await api.post(`/creatives/${id}/video/poll`);
+        setGallery((g) => g.map((c) => (c.id === id ? updated : c)));
+        if (updated.video_status === 'pending') {
+          pollTimers.current[id] = setTimeout(tick, 8000);
+        } else {
+          delete pollTimers.current[id];
+        }
+      } catch {
+        pollTimers.current[id] = setTimeout(tick, 8000);
+      }
+    };
+    pollTimers.current[id] = setTimeout(tick, 8000);
+  }
+
+  async function generateVideo() {
+    setBusy('video');
+    setError('');
+    try {
+      const created = await api.post('/creatives/video', {
+        prompt, aspectRatio: videoAspect, headline: copy.headline, primary_text: copy.primary_text, cta: copy.cta
+      });
+      setGallery((g) => [created, ...g]);
+      pollVideoStatus(created.id);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -177,31 +231,57 @@ export default function Creative() {
               </select>
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label htmlFor="sz">Placement</label>
-              <select id="sz" className="select" value={size} onChange={(e) => setSize(e.target.value)}>
-                {SIZES.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
-              </select>
+              {outputKind === 'video' ? (
+                <>
+                  <label htmlFor="sz">Aspect ratio</label>
+                  <select id="sz" className="select" value={videoAspect} onChange={(e) => setVideoAspect(e.target.value)}>
+                    {VIDEO_ASPECTS.map((a) => <option key={a.v} value={a.v}>{a.l}</option>)}
+                  </select>
+                </>
+              ) : (
+                <>
+                  <label htmlFor="sz">Placement</label>
+                  <select id="sz" className="select" value={size} onChange={(e) => setSize(e.target.value)}>
+                    {SIZES.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
+                  </select>
+                </>
+              )}
             </div>
           </div>
 
-          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
-            <input type="checkbox" checked={textInImage} onChange={(e) => setTextInImage(e.target.checked)} />
-            Put the offer text inside the image
-          </label>
+          {outputKind === 'image' && (
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+              <input type="checkbox" checked={textInImage} onChange={(e) => setTextInImage(e.target.checked)} />
+              Put the offer text inside the image
+            </label>
+          )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
             <span className="mono-label">Output</span>
             <div className="output-toggle">
-              <button type="button" className="opt on">Image</button>
-              <button type="button" className="opt" disabled title="Video generation isn't available yet">
-                Video · coming soon
+              <button type="button" className={`opt ${outputKind === 'image' ? 'on' : ''}`} onClick={() => setOutputKind('image')}>
+                Image
+              </button>
+              <button
+                type="button"
+                className={`opt ${outputKind === 'video' ? 'on' : ''}`}
+                onClick={() => setOutputKind('video')}
+                disabled={!providers.video}
+                title={providers.video ? '' : 'Add a Gemini/Vertex service account to generate video'}
+              >
+                Video
               </button>
             </div>
-            <div className="provider-row">
-              <span className="dot" style={{ background: providers.image ? 'var(--good)' : 'var(--muted-2)' }} />
-              <span className="name">OpenAI API</span>
-              <span className="model">GPT-IMAGE-1</span>
-            </div>
+            {(() => {
+              const [name, model] = PROVIDER_LABELS[providers[outputKind]] || ['Not connected', '—'];
+              return (
+                <div className="provider-row">
+                  <span className="dot" style={{ background: providers[outputKind] ? 'var(--good)' : 'var(--muted-2)' }} />
+                  <span className="name">{name}</span>
+                  <span className="model">{model}</span>
+                </div>
+              );
+            })()}
           </div>
 
           {providers.copy && (
@@ -214,7 +294,7 @@ export default function Creative() {
         <div>
           <div className="card" style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <h2 style={{ margin: 0, flex: 1 }}>Image prompt</h2>
+              <h2 style={{ margin: 0, flex: 1 }}>{outputKind === 'video' ? 'Video prompt' : 'Image prompt'}</h2>
               <span className="tag off">updates as you type</span>
             </div>
             <textarea
@@ -227,13 +307,25 @@ export default function Creative() {
               <button className="btn primary" onClick={() => toClipboard(prompt, 'prompt')} disabled={!brief}>
                 {copied === 'prompt' ? 'Copied ✓' : 'Copy prompt'}
               </button>
-              <a className="btn" href="https://chatgpt.com" target="_blank" rel="noreferrer">Open ChatGPT ↗</a>
-              {providers.image && (
+              {outputKind === 'image' && (
+                <a className="btn" href="https://chatgpt.com" target="_blank" rel="noreferrer">Open ChatGPT ↗</a>
+              )}
+              {outputKind === 'image' && providers.image && (
                 <button className="btn" onClick={generate} disabled={busy === 'image' || !brief}>
                   {busy === 'image' ? 'Generating…' : 'Generate here instead'}
                 </button>
               )}
+              {outputKind === 'video' && providers.video && (
+                <button className="btn" onClick={generateVideo} disabled={busy === 'video' || !brief}>
+                  {busy === 'video' ? 'Starting…' : 'Generate video'}
+                </button>
+              )}
             </div>
+            {outputKind === 'video' && (
+              <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
+                Veo takes a few minutes per video — it'll keep generating in the background and show up in the gallery below when ready.
+              </div>
+            )}
           </div>
 
           <div className="card" style={{ marginBottom: 16 }}>
@@ -293,6 +385,15 @@ export default function Creative() {
           {gallery.map((c) => (
             <div className="shot" key={c.id}>
               {c.image_data && <img src={c.image_data} alt={c.headline || 'Creative'} />}
+              {c.kind === 'video' && c.video_status === 'pending' && (
+                <div className="video-pending">Generating with Veo… this takes a few minutes.</div>
+              )}
+              {c.kind === 'video' && c.video_status === 'failed' && (
+                <div className="video-pending bad">{c.video_error || 'Video generation failed.'}</div>
+              )}
+              {c.kind === 'video' && c.video_status === 'ready' && c.video_url && (
+                <video src={c.video_url} controls />
+              )}
               <div className="body">
                 <div className="hl">{c.label || c.headline || 'Untitled'}</div>
                 <div className="pt">{c.primary_text || c.prompt}</div>
@@ -304,7 +405,8 @@ export default function Creative() {
                 <CreativeCampaignFields creative={c} onSaved={patchCreative} />
               </div>
               <div className="acts">
-                <a className="btn sm" href={c.image_data} download={`creative-${c.id}.png`}>Download</a>
+                {c.image_data && <a className="btn sm" href={c.image_data} download={`creative-${c.id}.png`}>Download</a>}
+                {c.video_url && <a className="btn sm" href={c.video_url} download={`creative-${c.id}.mp4`}>Download</a>}
                 {c.status !== 'approved' && <button className="btn sm" onClick={() => approve(c.id)}>Approve</button>}
                 <button className="btn sm ghost danger" onClick={() => remove(c.id)}>Delete</button>
               </div>

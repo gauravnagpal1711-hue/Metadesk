@@ -762,6 +762,13 @@ a.wa-btn:hover { background: rgba(0, 168, 132, .2); }
 .shot { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
 .shot:hover { border-color: #c4c4c9; }
 .shot img { width: 100%; display: block; aspect-ratio: 4 / 3; object-fit: cover; background: var(--line-soft); }
+.shot video { width: 100%; display: block; aspect-ratio: 4 / 3; object-fit: cover; background: #000; }
+.video-pending {
+  aspect-ratio: 4 / 3; display: flex; align-items: center; justify-content: center;
+  text-align: center; padding: 14px; font-size: 12.5px; color: var(--muted);
+  background: var(--line-soft);
+}
+.video-pending.bad { color: var(--danger); background: var(--danger-soft); }
 .shot .body { padding: 10px 11px; }
 .shot .hl { font-size: 12.5px; font-weight: 600; letter-spacing: -.005em; }
 .shot .pt { color: var(--muted); font-size: 12px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

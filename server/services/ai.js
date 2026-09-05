@@ -1,15 +1,62 @@
 /**
- * Creative generation. Two independent pieces:
- *   1. generateImage  -> OpenAI gpt-image-1, or Replicate (any model), whichever key is present.
- *   2. generateCopy   -> Claude writes headline / primary text / CTA for the same brief.
+ * Creative generation. Independent pieces:
+ *   1. generateImage        -> OpenAI gpt-image-1, Replicate, or Gemini/Imagen (Vertex AI),
+ *                               whichever is configured, in that priority order.
+ *   2. generateCopy         -> Claude writes headline / primary text / CTA for the same brief.
+ *   3. startVideo/pollVideo -> Gemini/Veo (Vertex AI) — the only video provider; generation
+ *                               is a long-running job, so the caller polls until it's done.
  * Reference images are accepted as base64 and passed to providers that support edits.
  */
+import { GoogleGenAI } from '@google/genai';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 export function imageProvider() {
   if (process.env.OPENAI_API_KEY) return 'openai';
   if (process.env.REPLICATE_API_TOKEN) return 'replicate';
+  if (vertexConfigured()) return 'vertex';
   return null;
 }
+
+export function videoProvider() {
+  return vertexConfigured() ? 'vertex' : null;
+}
+
+function vertexConfigured() {
+  return !!(process.env.GOOGLE_CLOUD_PROJECT
+    && (process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GOOGLE_SERVICE_ACCOUNT_JSON));
+}
+
+// Railway's filesystem doesn't persist a saved credentials file across
+// redeploys, so production hands us the service-account JSON directly as an
+// env var; write it to a temp file once and point ADC at it, since
+// @google/genai's Vertex mode only knows how to load credentials from a file.
+let credsBootstrapped = false;
+function ensureGoogleCredentialsFile() {
+  if (credsBootstrapped) return;
+  credsBootstrapped = true;
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS && process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    const file = path.join(os.tmpdir(), 'google-credentials.json');
+    fs.writeFileSync(file, process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = file;
+  }
+}
+
+let vertexClient = null;
+function vertexAI() {
+  if (vertexClient) return vertexClient;
+  ensureGoogleCredentialsFile();
+  vertexClient = new GoogleGenAI({
+    vertexai: true,
+    project: process.env.GOOGLE_CLOUD_PROJECT,
+    location: process.env.GOOGLE_CLOUD_LOCATION || 'us-central1'
+  });
+  return vertexClient;
+}
+
+const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'imagen-4.0-generate-001';
+const GEMINI_VIDEO_MODEL = process.env.GEMINI_VIDEO_MODEL || 'veo-3.0-generate-001';
 
 export function copyProvider() {
   return process.env.ANTHROPIC_API_KEY ? 'anthropic' : null;
@@ -22,9 +69,53 @@ export function copyProvider() {
  */
 export async function generateImage(prompt, opts = {}) {
   const provider = imageProvider();
-  if (!provider) throw new Error('Add OPENAI_API_KEY or REPLICATE_API_TOKEN to generate images.');
+  if (!provider) throw new Error('Add OPENAI_API_KEY, REPLICATE_API_TOKEN, or a Gemini/Vertex service account to generate images.');
   if (provider === 'openai') return openaiImage(prompt, opts);
+  if (provider === 'vertex') return vertexImage(prompt, opts);
   return replicateImage(prompt, opts);
+}
+
+const IMAGE_ASPECT_RATIOS = { '1024x1024': '1:1', '1024x1536': '9:16', '1536x1024': '16:9' };
+
+async function vertexImage(prompt, { size } = {}) {
+  const ai = vertexAI();
+  const res = await ai.models.generateImages({
+    model: GEMINI_IMAGE_MODEL,
+    prompt,
+    config: { numberOfImages: 1, aspectRatio: IMAGE_ASPECT_RATIOS[size] || '1:1', includeRaiReason: true }
+  });
+  const picked = res.generatedImages?.[0];
+  if (!picked?.image?.imageBytes) throw new Error(picked?.raiFilteredReason || 'Gemini returned no image.');
+  return { provider: `vertex:${GEMINI_IMAGE_MODEL}`, dataUrl: `data:${picked.image.mimeType || 'image/png'};base64,${picked.image.imageBytes}` };
+}
+
+/**
+ * Starts a Veo video generation job (takes minutes, not seconds) and returns
+ * the operation name to poll with pollVideo(). Aspect ratio only: 16:9 or 9:16.
+ */
+export async function startVideo(prompt, { aspectRatio = '16:9' } = {}) {
+  if (videoProvider() !== 'vertex') throw new Error('Add a Gemini/Vertex service account to generate video.');
+  const ai = vertexAI();
+  const operation = await ai.models.generateVideos({
+    model: GEMINI_VIDEO_MODEL,
+    prompt,
+    config: { numberOfVideos: 1, aspectRatio }
+  });
+  return { provider: `vertex:${GEMINI_VIDEO_MODEL}`, operationName: operation.name };
+}
+
+/**
+ * Polls one Veo job. Returns { done: false } while still generating, or
+ * { done: true, dataUrl } / { done: true, error } once it finishes.
+ */
+export async function pollVideo(operationName) {
+  const ai = vertexAI();
+  const operation = await ai.operations.getVideosOperation({ operation: { name: operationName } });
+  if (!operation.done) return { done: false };
+  if (operation.error) return { done: true, error: operation.error.message || 'Video generation failed.' };
+  const video = operation.response?.generatedVideos?.[0]?.video;
+  if (!video?.videoBytes) return { done: true, error: 'Gemini returned no video.' };
+  return { done: true, dataUrl: `data:${video.mimeType || 'video/mp4'};base64,${video.videoBytes}` };
 }
 
 async function openaiImage(prompt, { size = '1024x1024', referenceImage } = {}) {

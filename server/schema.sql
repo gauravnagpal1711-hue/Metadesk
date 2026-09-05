@@ -38,6 +38,13 @@ ALTER TABLE creatives ADD COLUMN IF NOT EXISTS link_url TEXT;
 -- Campaign details entered up front in "Set up for campaign" / Create campaign,
 -- kept with the artwork so they pre-fill next time. { name, daily_budget, audience, start_at, end_at }
 ALTER TABLE creatives ADD COLUMN IF NOT EXISTS campaign_defaults JSONB;
+-- Veo (Gemini/Vertex) video generation is a long-running job: video_status
+-- tracks it (pending | ready | failed) while video_operation_name holds the
+-- job to poll; video_url gets a base64 data URL once ready (same shape as
+-- image_data, kept under its existing column name for compatibility).
+ALTER TABLE creatives ADD COLUMN IF NOT EXISTS video_status TEXT;
+ALTER TABLE creatives ADD COLUMN IF NOT EXISTS video_operation_name TEXT;
+ALTER TABLE creatives ADD COLUMN IF NOT EXISTS video_error TEXT;
 
 CREATE TABLE IF NOT EXISTS campaigns (
 id TEXT PRIMARY KEY, -- Meta campaign id

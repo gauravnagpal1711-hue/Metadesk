@@ -1,12 +1,12 @@
 import express from 'express';
 import { q } from '../db.js';
-import { generateImage, generateCopy, imageProvider, copyProvider } from '../services/ai.js';
+import { generateImage, generateCopy, imageProvider, copyProvider, videoProvider, startVideo, pollVideo } from '../services/ai.js';
 import { syncBriefForCreative } from './campaignBriefs.js';
 
 export const creativesRouter = express.Router();
 
 creativesRouter.get('/providers', (req, res) => {
-  res.json({ image: imageProvider(), copy: copyProvider() });
+  res.json({ image: imageProvider(), copy: copyProvider(), video: videoProvider() });
 });
 
 creativesRouter.get('/', async (req, res, next) => {
@@ -44,6 +44,49 @@ creativesRouter.post('/image', async (req, res, next) => {
       [prompt, headline || null, primary_text || null, cta || null, provider, dataUrl, req.user.id]
     );
     res.json(rows[0]);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Kick off a Veo video job and store it as a pending draft creative. Poll
+ *  POST /:id/video/poll to find out when it's ready. */
+creativesRouter.post('/video', async (req, res, next) => {
+  try {
+    const { prompt, aspectRatio, headline, primary_text, cta } = req.body || {};
+    if (!prompt) return res.status(400).json({ error: 'Write a prompt first.' });
+    const { provider, operationName } = await startVideo(prompt, { aspectRatio });
+    const { rows } = await q(
+      `INSERT INTO creatives (kind, prompt, headline, primary_text, cta, provider, video_status, video_operation_name, user_id)
+       VALUES ('video',$1,$2,$3,$4,$5,'pending',$6,$7) RETURNING *`,
+      [prompt, headline || null, primary_text || null, cta || null, provider, operationName, req.user.id]
+    );
+    res.json(rows[0]);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Check on a pending video job; fills in video_url once Veo finishes. */
+creativesRouter.post('/:id/video/poll', async (req, res, next) => {
+  try {
+    const { rows } = await q('SELECT * FROM creatives WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    const creative = rows[0];
+    if (!creative) return res.status(404).json({ error: 'That creative no longer exists.' });
+    if (creative.video_status !== 'pending' || !creative.video_operation_name) return res.json(creative);
+
+    const result = await pollVideo(creative.video_operation_name);
+    if (!result.done) return res.json(creative);
+
+    const { rows: updated } = await q(
+      `UPDATE creatives SET
+         video_status = $3,
+         video_url = COALESCE($4, video_url),
+         video_error = $5
+       WHERE id = $1 AND user_id = $2 RETURNING *`,
+      [req.params.id, req.user.id, result.error ? 'failed' : 'ready', result.dataUrl || null, result.error || null]
+    );
+    res.json(updated[0]);
   } catch (e) {
     next(e);
   }

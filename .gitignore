@@ -9,3 +9,4 @@ dist/
 .DS_Store
 wa-session/
 data/
+google-credentials.json
