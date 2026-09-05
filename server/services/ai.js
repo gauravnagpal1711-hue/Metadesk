@@ -7,7 +7,7 @@
  *                               is a long-running job, so the caller polls until it's done.
  * Reference images are accepted as base64 and passed to providers that support edits.
  */
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, GenerateVideosOperation } from '@google/genai';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -59,7 +59,9 @@ function vertexAI() {
 // Gemini's own native image output (generateContent, not generateImages)
 // is what's actually available, confirmed working 2026-09-05.
 const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image';
-const GEMINI_VIDEO_MODEL = process.env.GEMINI_VIDEO_MODEL || 'veo-3.0-generate-001';
+// veo-3.0-generate-001 (and veo-2.0) 404 on this project — only the 3.1
+// family is actually invocable here, confirmed 2026-09-05.
+const GEMINI_VIDEO_MODEL = process.env.GEMINI_VIDEO_MODEL || 'veo-3.1-generate-001';
 
 export function copyProvider() {
   return process.env.ANTHROPIC_API_KEY ? 'anthropic' : null;
@@ -113,7 +115,11 @@ export async function startVideo(prompt, { aspectRatio = '16:9' } = {}) {
  */
 export async function pollVideo(operationName) {
   const ai = vertexAI();
-  const operation = await ai.operations.getVideosOperation({ operation: { name: operationName } });
+  // getVideosOperation calls a prototype method on whatever's passed as
+  // `operation` (_fromAPIResponse) — a plain {name} object isn't enough,
+  // it has to be a real GenerateVideosOperation instance.
+  const stub = Object.assign(new GenerateVideosOperation(), { name: operationName });
+  const operation = await ai.operations.getVideosOperation({ operation: stub });
   if (!operation.done) return { done: false };
   if (operation.error) return { done: true, error: operation.error.message || 'Video generation failed.' };
   const video = operation.response?.generatedVideos?.[0]?.video;
