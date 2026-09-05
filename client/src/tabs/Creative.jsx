@@ -18,11 +18,13 @@ const VIDEO_ASPECTS = [
   { v: '9:16', l: 'Portrait 9:16 — story, reels' }
 ];
 
-const PROVIDER_LABELS = {
-  openai: ['OpenAI API', 'GPT-IMAGE-1'],
-  replicate: ['Replicate', 'FLUX'],
-  vertex: ['Google Gemini', 'Imagen / Veo (Vertex AI)']
-};
+/** A gallery card's provider is a technical id (openai, vertex:veo-3.1-generate-001,
+ *  manual, ...) — never show that as-is; say what it means in plain words instead. */
+function friendlyProvider(provider) {
+  if (!provider) return null;
+  if (provider === 'manual') return '📤 Uploaded';
+  return '✨ Made with AI';
+}
 
 /** Builds a usable image prompt with no API call — this runs entirely in your browser. */
 function buildPrompt({ brief, offer, audience, size, style, textInImage }) {
@@ -267,21 +269,19 @@ export default function Creative() {
                 className={`opt ${outputKind === 'video' ? 'on' : ''}`}
                 onClick={() => setOutputKind('video')}
                 disabled={!providers.video}
-                title={providers.video ? '' : 'Add a Gemini/Vertex service account to generate video'}
+                title={providers.video ? '' : 'Video generation is not set up yet — ask whoever manages this app to turn it on'}
               >
                 Video
               </button>
             </div>
-            {(() => {
-              const [name, model] = PROVIDER_LABELS[providers[outputKind]] || ['Not connected', '—'];
-              return (
-                <div className="provider-row">
-                  <span className="dot" style={{ background: providers[outputKind] ? 'var(--good)' : 'var(--muted-2)' }} />
-                  <span className="name">{name}</span>
-                  <span className="model">{model}</span>
-                </div>
-              );
-            })()}
+            <div className="provider-row">
+              <span className="dot" style={{ background: providers[outputKind] ? 'var(--good)' : 'var(--muted-2)' }} />
+              <span className="name" style={{ textTransform: 'none', fontFamily: 'inherit', fontSize: 13, letterSpacing: 'normal' }}>
+                {providers[outputKind]
+                  ? (outputKind === 'video' ? 'Ready to generate video' : 'Ready to generate images')
+                  : 'Not set up yet'}
+              </span>
+            </div>
           </div>
 
           {providers.copy && (
@@ -323,7 +323,7 @@ export default function Creative() {
             </div>
             {outputKind === 'video' && (
               <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
-                Veo takes a few minutes per video — it'll keep generating in the background and show up in the gallery below when ready.
+                Video takes a few minutes to make — it'll keep generating in the background and show up in the gallery below when ready.
               </div>
             )}
           </div>
@@ -386,7 +386,7 @@ export default function Creative() {
             <div className="shot" key={c.id}>
               {c.image_data && <img src={c.image_data} alt={c.headline || 'Creative'} />}
               {c.kind === 'video' && c.video_status === 'pending' && (
-                <div className="video-pending">Generating with Veo… this takes a few minutes.</div>
+                <div className="video-pending">Making your video… this takes a few minutes.</div>
               )}
               {c.kind === 'video' && c.video_status === 'failed' && (
                 <div className="video-pending bad">{c.video_error || 'Video generation failed.'}</div>
@@ -399,7 +399,7 @@ export default function Creative() {
                 <div className="pt">{c.primary_text || c.prompt}</div>
                 <div style={{ marginTop: 8, display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                   <span className={`tag ${c.status === 'approved' ? 'good' : 'off'}`}>{c.status}</span>
-                  <span className="tag off">{c.provider}</span>
+                  {friendlyProvider(c.provider) && <span className="tag off">{friendlyProvider(c.provider)}</span>}
                   {isCampaignReady(c) && <span className="tag good">✓ campaign-ready</span>}
                 </div>
                 <CreativeCampaignFields creative={c} onSaved={patchCreative} />
