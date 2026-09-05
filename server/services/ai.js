@@ -82,11 +82,21 @@ export async function generateImage(prompt, opts = {}) {
 
 const IMAGE_ASPECT_RATIOS = { '1024x1024': '1:1', '1024x1536': '2:3', '1536x1024': '3:2' };
 
-async function vertexImage(prompt, { size } = {}) {
+/** data:mime;base64,xxx -> { mimeType, data } for Gemini's inlineData parts. */
+function parseDataUrl(dataUrl) {
+  const [, mimeType, data] = dataUrl.match(/^data:([^;]+);base64,(.*)$/) || [];
+  if (!data) throw new Error('referenceImage must be a base64 data URL.');
+  return { mimeType, data };
+}
+
+async function vertexImage(prompt, { size, referenceImage } = {}) {
   const ai = vertexAI();
+  const contents = referenceImage
+    ? [{ inlineData: parseDataUrl(referenceImage) }, { text: prompt }]
+    : prompt;
   const res = await ai.models.generateContent({
     model: GEMINI_IMAGE_MODEL,
-    contents: prompt,
+    contents,
     config: { imageConfig: { aspectRatio: IMAGE_ASPECT_RATIOS[size] || '1:1' } }
   });
   const part = res.candidates?.[0]?.content?.parts?.find((p) => p.inlineData);
@@ -97,13 +107,16 @@ async function vertexImage(prompt, { size } = {}) {
 /**
  * Starts a Veo video generation job (takes minutes, not seconds) and returns
  * the operation name to poll with pollVideo(). Aspect ratio only: 16:9 or 9:16.
+ * A referenceImage (data URL), when given, becomes the video's starting frame.
  */
-export async function startVideo(prompt, { aspectRatio = '16:9' } = {}) {
+export async function startVideo(prompt, { aspectRatio = '16:9', referenceImage } = {}) {
   if (videoProvider() !== 'vertex') throw new Error('Add a Gemini/Vertex service account to generate video.');
   const ai = vertexAI();
+  const ref = referenceImage ? parseDataUrl(referenceImage) : null;
   const operation = await ai.models.generateVideos({
     model: GEMINI_VIDEO_MODEL,
     prompt,
+    image: ref ? { imageBytes: ref.data, mimeType: ref.mimeType } : undefined,
     config: { numberOfVideos: 1, aspectRatio }
   });
   return { provider: `vertex:${GEMINI_VIDEO_MODEL}`, operationName: operation.name };

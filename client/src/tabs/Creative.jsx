@@ -14,9 +14,11 @@ const SIZES = [
 ];
 
 const VIDEO_ASPECTS = [
-  { v: '16:9', l: 'Landscape 16:9 — feed, right column' },
-  { v: '9:16', l: 'Portrait 9:16 — story, reels' }
+  { v: '16:9', l: 'Landscape 16:9 — feed, right column', ratio: 'horizontal 16:9' },
+  { v: '9:16', l: 'Portrait 9:16 — story, reels', ratio: 'vertical 9:16' }
 ];
+
+const DEFAULT_STYLE = 'Bright, premium';
 
 /** A gallery card's provider is a technical id (openai, vertex:veo-3.1-generate-001,
  *  manual, ...) — never show that as-is; say what it means in plain words instead. */
@@ -26,39 +28,45 @@ function friendlyProvider(provider) {
   return '✨ Made with AI';
 }
 
-/** Builds a usable image prompt with no API call — this runs entirely in your browser. */
-function buildPrompt({ brief, offer, audience, size, style, textInImage }) {
-  const ratio = SIZES.find((s) => s.v === size)?.ratio || 'square 1:1';
-  const lines = [
-    `${style} advertising photograph, ${ratio} composition.`,
+/** Builds a usable prompt with no API call — this runs entirely in your browser. */
+function buildPrompt({ brief, ratio, forVideo }) {
+  if (forVideo) {
+    return [
+      `${DEFAULT_STYLE} advertising video, ${ratio} composition.`,
+      `Subject: ${brief || 'the product'}.`,
+      'Smooth camera motion, studio-quality lighting, clean uncluttered background.',
+      'Photorealistic, high detail, colour-graded for social media.'
+    ].filter(Boolean).join(' ');
+  }
+  return [
+    `${DEFAULT_STYLE} advertising photograph, ${ratio} composition.`,
     `Subject: ${brief || 'the product'}.`,
-    audience ? `Made to appeal to ${audience}.` : null,
     'Studio-quality lighting, shallow depth of field, clean uncluttered background with room at the top for text.',
-    textInImage && offer
-      ? `Include the words "${offer}" as a clean, well-kerned badge in the lower third. Spell it exactly.`
-      : 'No text, no words, no logos anywhere in the image.',
+    'No text, no words, no logos anywhere in the image.',
     'Photorealistic, high detail, colour-graded for social media.'
-  ];
-  return lines.filter(Boolean).join(' ');
+  ].filter(Boolean).join(' ');
 }
+
+const SpeechRecognitionCtor =
+  typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
 
 export default function Creative() {
   const [providers, setProviders] = useState({ image: null, copy: null, video: null });
-  const [brief, setBrief] = useState('');
-  const [offer, setOffer] = useState('');
-  const [audience, setAudience] = useState('');
-  const [language, setLanguage] = useState('English');
-  const [style, setStyle] = useState('Bright, premium');
-  const [textInImage, setTextInImage] = useState(true);
-  const [size, setSize] = useState(SIZES[0].v);
   const [outputKind, setOutputKind] = useState('image');
+  const [brief, setBrief] = useState('');
+  const [size, setSize] = useState(SIZES[0].v);
   const [videoAspect, setVideoAspect] = useState(VIDEO_ASPECTS[0].v);
+  const [attachment, setAttachment] = useState(null); // { dataUrl, mime, name }
+  const [recording, setRecording] = useState(false);
   const [copy, setCopy] = useState({ headline: '', primary_text: '', cta: '', image_prompt: '' });
+  const [promptModal, setPromptModal] = useState(null); // null closed, else { text }
   const [gallery, setGallery] = useState([]);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
   const fileRef = useRef(null);
+  const attachRef = useRef(null);
+  const recognitionRef = useRef(null);
   const pollTimers = useRef({});
 
   useEffect(() => {
@@ -67,10 +75,11 @@ export default function Creative() {
       setGallery(rows);
       rows.filter((c) => c.video_status === 'pending').forEach((c) => pollVideoStatus(c.id));
     }).catch(() => {});
-    return () => Object.values(pollTimers.current).forEach(clearTimeout);
+    return () => {
+      Object.values(pollTimers.current).forEach(clearTimeout);
+      recognitionRef.current?.stop();
+    };
   }, []);
-
-  const prompt = copy.image_prompt || buildPrompt({ brief, offer, audience, size, style, textInImage });
 
   async function toClipboard(text, key) {
     try {
@@ -82,11 +91,47 @@ export default function Creative() {
     }
   }
 
+  function toggleVoice() {
+    if (recording) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    if (!SpeechRecognitionCtor) return;
+    const rec = new SpeechRecognitionCtor();
+    rec.lang = 'en-IN';
+    rec.continuous = true;
+    rec.interimResults = true;
+    let finalText = brief ? `${brief} ` : '';
+    rec.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const chunk = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += `${chunk} `;
+        else interim += chunk;
+      }
+      setBrief((finalText + interim).trim());
+    };
+    rec.onerror = () => setRecording(false);
+    rec.onend = () => setRecording(false);
+    recognitionRef.current = rec;
+    rec.start();
+    setRecording(true);
+  }
+
+  function pickAttachment(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setAttachment({ dataUrl: reader.result, mime: file.type, name: file.name });
+    reader.onerror = () => setError('Could not read that file.');
+    reader.readAsDataURL(file);
+    if (attachRef.current) attachRef.current.value = '';
+  }
+
   async function writeCopy() {
     setBusy('copy');
     setError('');
     try {
-      setCopy(await api.post('/creatives/copy', { brief, offer, audience, language }));
+      setCopy(await api.post('/creatives/copy', { brief }));
     } catch (e) {
       setError(e.message);
     } finally {
@@ -94,14 +139,24 @@ export default function Creative() {
     }
   }
 
-  async function generate() {
+  function openPromptModal() {
+    const forVideo = outputKind === 'video';
+    const ratio = forVideo
+      ? VIDEO_ASPECTS.find((a) => a.v === videoAspect)?.ratio || 'horizontal 16:9'
+      : SIZES.find((s) => s.v === size)?.ratio || 'square 1:1';
+    setPromptModal({ text: copy.image_prompt || buildPrompt({ brief, ratio, forVideo }) });
+  }
+
+  async function generate(promptText) {
     setBusy('image');
     setError('');
     try {
       const created = await api.post('/creatives/image', {
-        prompt, size, headline: copy.headline, primary_text: copy.primary_text, cta: copy.cta
+        prompt: promptText, size, referenceImage: attachment?.dataUrl,
+        headline: copy.headline, primary_text: copy.primary_text, cta: copy.cta
       });
       setGallery((g) => [created, ...g]);
+      setPromptModal(null);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -129,20 +184,27 @@ export default function Creative() {
     pollTimers.current[id] = setTimeout(tick, 8000);
   }
 
-  async function generateVideo() {
+  async function generateVideo(promptText) {
     setBusy('video');
     setError('');
     try {
       const created = await api.post('/creatives/video', {
-        prompt, aspectRatio: videoAspect, headline: copy.headline, primary_text: copy.primary_text, cta: copy.cta
+        prompt: promptText, aspectRatio: videoAspect, referenceImage: attachment?.dataUrl,
+        headline: copy.headline, primary_text: copy.primary_text, cta: copy.cta
       });
       setGallery((g) => [created, ...g]);
       pollVideoStatus(created.id);
+      setPromptModal(null);
     } catch (e) {
       setError(e.message);
     } finally {
       setBusy('');
     }
+  }
+
+  function submitFromModal() {
+    if (outputKind === 'video') generateVideo(promptModal.text);
+    else generate(promptModal.text);
   }
 
   async function upload(file) {
@@ -158,7 +220,6 @@ export default function Creative() {
       });
       const created = await api.post('/creatives/upload', {
         imageData: dataUrl,
-        prompt,
         headline: copy.headline,
         primary_text: copy.primary_text,
         cta: copy.cta
@@ -187,6 +248,7 @@ export default function Creative() {
   }
 
   const someReady = gallery.some(isCampaignReady);
+  const generating = busy === 'image' || busy === 'video';
 
   return (
     <>
@@ -198,141 +260,108 @@ export default function Creative() {
         </div>
       )}
 
+      <div className="output-toggle" style={{ marginBottom: 16 }}>
+        <button type="button" className={`opt ${outputKind === 'image' ? 'on' : ''}`} onClick={() => setOutputKind('image')}>
+          🖼️ Image
+        </button>
+        <button
+          type="button"
+          className={`opt ${outputKind === 'video' ? 'on' : ''}`}
+          onClick={() => setOutputKind('video')}
+          disabled={!providers.video}
+          title={providers.video ? '' : 'Video generation is not set up yet — ask whoever manages this app to turn it on'}
+        >
+          🎬 Video
+        </button>
+      </div>
+
       <div className="grid2">
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <h2>Campaign brief</h2>
+          <h2>What are you advertising?</h2>
 
           <div className="field" style={{ marginBottom: 0 }}>
-            <label htmlFor="brief">Brief — who it's for, the offer, the angle</label>
-            <textarea
-              id="brief"
-              className="textarea"
-              placeholder="Weekend gold jewellery exhibition at our Andheri showroom."
-              value={brief}
-              onChange={(e) => setBrief(e.target.value)}
-            />
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label htmlFor="offer">Offer</label>
-              <input id="offer" className="input" placeholder="20% off making charges" value={offer} onChange={(e) => setOffer(e.target.value)} />
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label htmlFor="aud">Audience</label>
-              <input id="aud" className="input" placeholder="Women 28-45, Mumbai" value={audience} onChange={(e) => setAudience(e.target.value)} />
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label htmlFor="style">Look</label>
-              <select id="style" className="select" value={style} onChange={(e) => setStyle(e.target.value)}>
-                <option>Bright, premium</option>
-                <option>Warm, festive</option>
-                <option>Dark, luxury</option>
-                <option>Clean, minimal</option>
-                <option>Candid, lifestyle</option>
-              </select>
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              {outputKind === 'video' ? (
-                <>
-                  <label htmlFor="sz">Aspect ratio</label>
-                  <select id="sz" className="select" value={videoAspect} onChange={(e) => setVideoAspect(e.target.value)}>
-                    {VIDEO_ASPECTS.map((a) => <option key={a.v} value={a.v}>{a.l}</option>)}
-                  </select>
-                </>
-              ) : (
-                <>
-                  <label htmlFor="sz">Placement</label>
-                  <select id="sz" className="select" value={size} onChange={(e) => setSize(e.target.value)}>
-                    {SIZES.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
-                  </select>
-                </>
-              )}
+            <div style={{ position: 'relative' }}>
+              <textarea
+                id="brief"
+                className="textarea"
+                style={{ minHeight: 150, paddingRight: 76 }}
+                placeholder="Weekend gold jewellery exhibition at our Andheri showroom, 20% off making charges."
+                value={brief}
+                onChange={(e) => setBrief(e.target.value)}
+              />
+              <div style={{ position: 'absolute', right: 8, bottom: 8, display: 'flex', gap: 4 }}>
+                <button
+                  type="button"
+                  className={`wa-icon-btn ${recording ? 'recording' : ''}`}
+                  onClick={toggleVoice}
+                  disabled={!SpeechRecognitionCtor}
+                  title={SpeechRecognitionCtor ? (recording ? 'Stop listening' : 'Speak your brief') : 'Voice input is not supported in this browser'}
+                  aria-label="Speak your brief"
+                >
+                  🎤
+                </button>
+                <button
+                  type="button"
+                  className="wa-icon-btn"
+                  onClick={() => attachRef.current?.click()}
+                  title="Attach a reference photo"
+                  aria-label="Attach a reference photo"
+                >
+                  📎
+                </button>
+              </div>
+              <input
+                ref={attachRef}
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={(e) => pickAttachment(e.target.files?.[0])}
+              />
             </div>
           </div>
 
-          {outputKind === 'image' && (
-            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
-              <input type="checkbox" checked={textInImage} onChange={(e) => setTextInImage(e.target.checked)} />
-              Put the offer text inside the image
-            </label>
+          {recording && <div style={{ fontSize: 12.5, color: 'var(--accent)' }}>🎙️ Listening… speak now, tap the mic again to stop.</div>}
+
+          {attachment && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <img src={attachment.dataUrl} alt="" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 6 }} />
+              <span style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{attachment.name}</span>
+              <button className="btn ghost sm" onClick={() => setAttachment(null)}>Remove</button>
+            </div>
           )}
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-            <span className="mono-label">Output</span>
-            <div className="output-toggle">
-              <button type="button" className={`opt ${outputKind === 'image' ? 'on' : ''}`} onClick={() => setOutputKind('image')}>
-                Image
-              </button>
-              <button
-                type="button"
-                className={`opt ${outputKind === 'video' ? 'on' : ''}`}
-                onClick={() => setOutputKind('video')}
-                disabled={!providers.video}
-                title={providers.video ? '' : 'Video generation is not set up yet — ask whoever manages this app to turn it on'}
-              >
-                Video
-              </button>
-            </div>
-            <div className="provider-row">
-              <span className="dot" style={{ background: providers[outputKind] ? 'var(--good)' : 'var(--muted-2)' }} />
-              <span className="name" style={{ textTransform: 'none', fontFamily: 'inherit', fontSize: 13, letterSpacing: 'normal' }}>
-                {providers[outputKind]
-                  ? (outputKind === 'video' ? 'Ready to generate video' : 'Ready to generate images')
-                  : 'Not set up yet'}
-              </span>
-            </div>
+          <div className="provider-row">
+            <span className="dot" style={{ background: providers[outputKind] ? 'var(--good)' : 'var(--muted-2)' }} />
+            <span className="name" style={{ textTransform: 'none', fontFamily: 'inherit', fontSize: 13, letterSpacing: 'normal' }}>
+              {providers[outputKind]
+                ? (outputKind === 'video' ? 'Ready to generate video' : 'Ready to generate images')
+                : 'Not set up yet'}
+            </span>
           </div>
 
-          {providers.copy && (
-            <button className="btn primary" onClick={writeCopy} disabled={!brief || busy === 'copy'}>
-              {busy === 'copy' ? 'Writing…' : 'Write the ad copy for me'}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {providers.copy && (
+              <button className="btn ghost" onClick={writeCopy} disabled={!brief || busy === 'copy'}>
+                {busy === 'copy' ? 'Writing…' : 'Write the ad copy for me'}
+              </button>
+            )}
+            <button
+              className="btn primary"
+              style={{ marginLeft: 'auto' }}
+              onClick={openPromptModal}
+              disabled={!brief || !providers[outputKind]}
+            >
+              {outputKind === 'video' ? 'Generate video' : 'Generate image'}
             </button>
-          )}
+          </div>
         </div>
 
         <div>
           <div className="card" style={{ marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <h2 style={{ margin: 0, flex: 1 }}>{outputKind === 'video' ? 'Video prompt' : 'Image prompt'}</h2>
-              <span className="tag off">updates as you type</span>
-            </div>
-            <textarea
-              className="textarea"
-              style={{ minHeight: 130 }}
-              value={prompt}
-              onChange={(e) => setCopy({ ...copy, image_prompt: e.target.value })}
-            />
-            <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-              <button className="btn primary" onClick={() => toClipboard(prompt, 'prompt')} disabled={!brief}>
-                {copied === 'prompt' ? 'Copied ✓' : 'Copy prompt'}
-              </button>
-              {outputKind === 'image' && (
-                <a className="btn" href="https://chatgpt.com" target="_blank" rel="noreferrer">Open ChatGPT ↗</a>
-              )}
-              {outputKind === 'image' && providers.image && (
-                <button className="btn" onClick={generate} disabled={busy === 'image' || !brief}>
-                  {busy === 'image' ? 'Generating…' : 'Generate here instead'}
-                </button>
-              )}
-              {outputKind === 'video' && providers.video && (
-                <button className="btn" onClick={generateVideo} disabled={busy === 'video' || !brief}>
-                  {busy === 'video' ? 'Starting…' : 'Generate video'}
-                </button>
-              )}
-            </div>
-            {outputKind === 'video' && (
-              <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
-                Video takes a few minutes to make — it'll keep generating in the background and show up in the gallery below when ready.
-              </div>
-            )}
-          </div>
-
-          <div className="card" style={{ marginBottom: 16 }}>
             <h2>Bring the artwork back</h2>
             <ol className="steps" style={{ marginBottom: 14 }}>
-              <li>Copy the prompt and paste it into ChatGPT.</li>
-              <li>Download the image it gives you.</li>
+              <li>Write a prompt (or copy the one we build for you).</li>
+              <li>Make the image with any AI tool you like.</li>
               <li>Upload it here — it joins your gallery with this copy attached.</li>
             </ol>
             <input
@@ -370,6 +399,65 @@ export default function Creative() {
         </div>
       </div>
 
+      {promptModal && (
+        <>
+          <div className="scrim" onClick={() => !generating && setPromptModal(null)} />
+          <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+            <div className="card" style={{ width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
+                <h2 style={{ margin: 0 }}>{outputKind === 'video' ? 'Review your video' : 'Review your image'}</h2>
+                <button className="close" style={{ marginLeft: 'auto' }} onClick={() => setPromptModal(null)} disabled={generating} aria-label="Close">×</button>
+              </div>
+
+              <div className="field" style={{ marginBottom: 10 }}>
+                <label htmlFor="final-prompt">Prompt — edit anything before generating</label>
+                <textarea
+                  id="final-prompt"
+                  className="textarea"
+                  style={{ minHeight: 150 }}
+                  value={promptModal.text}
+                  onChange={(e) => setPromptModal((p) => ({ ...p, text: e.target.value }))}
+                />
+              </div>
+
+              <div className="field" style={{ marginBottom: 0 }}>
+                {outputKind === 'video' ? (
+                  <>
+                    <label htmlFor="modal-aspect">Aspect ratio</label>
+                    <select id="modal-aspect" className="select" value={videoAspect} onChange={(e) => setVideoAspect(e.target.value)}>
+                      {VIDEO_ASPECTS.map((a) => <option key={a.v} value={a.v}>{a.l}</option>)}
+                    </select>
+                  </>
+                ) : (
+                  <>
+                    <label htmlFor="modal-aspect">Placement</label>
+                    <select id="modal-aspect" className="select" value={size} onChange={(e) => setSize(e.target.value)}>
+                      {SIZES.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
+                    </select>
+                  </>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
+                <button className="btn ghost" onClick={() => toClipboard(promptModal.text, 'prompt')}>
+                  {copied === 'prompt' ? 'Copied ✓' : 'Copy prompt'}
+                </button>
+                <button className="btn primary" style={{ marginLeft: 'auto' }} onClick={submitFromModal} disabled={generating}>
+                  {generating
+                    ? (outputKind === 'video' ? 'Starting…' : 'Generating…')
+                    : (outputKind === 'video' ? 'Generate video' : 'Generate image')}
+                </button>
+              </div>
+              {outputKind === 'video' && (
+                <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
+                  Video takes a few minutes to make — it'll keep generating in the background and show up in the gallery below when ready.
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '28px 0 12px' }}>
         <h2 style={{ margin: 0, fontSize: 16 }}>Gallery</h2>
         <span className="mono-label">{gallery.length} creatives</span>
@@ -378,7 +466,7 @@ export default function Creative() {
       {gallery.length === 0 ? (
         <div className="empty">
           <h3>Nothing here yet</h3>
-          Write a brief, copy the prompt into ChatGPT, then upload what comes back.
+          Describe what you're advertising above, then generate or upload your first creative.
         </div>
       ) : (
         <div className="gallery">

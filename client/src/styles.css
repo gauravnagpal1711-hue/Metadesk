@@ -648,7 +648,7 @@ tr.has-unread .name { font-weight: 700; }
   background: #f0f2f5;
   border-top: 1px solid var(--line);
 }
-.wa-composer .wa-icon-btn {
+.wa-icon-btn {
   width: 36px; height: 36px; flex: 0 0 36px;
   border-radius: 50%;
   border: none;
@@ -658,7 +658,13 @@ tr.has-unread .name { font-weight: 700; }
   cursor: pointer;
   color: #54656f;
 }
-.wa-composer .wa-icon-btn:hover { background: rgba(0, 0, 0, .06); }
+.wa-icon-btn:hover:not(:disabled) { background: rgba(0, 0, 0, .06); }
+.wa-icon-btn:disabled { opacity: .4; cursor: not-allowed; }
+.wa-icon-btn.recording { background: var(--danger-soft); color: var(--danger); animation: mic-pulse 1.4s ease-in-out infinite; }
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--danger-soft); }
+  50% { box-shadow: 0 0 0 6px transparent; }
+}
 .wa-composer .input {
   border-radius: 999px;
   border: none;

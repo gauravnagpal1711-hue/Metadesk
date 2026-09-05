@@ -53,9 +53,9 @@ creativesRouter.post('/image', async (req, res, next) => {
  *  POST /:id/video/poll to find out when it's ready. */
 creativesRouter.post('/video', async (req, res, next) => {
   try {
-    const { prompt, aspectRatio, headline, primary_text, cta } = req.body || {};
+    const { prompt, aspectRatio, referenceImage, headline, primary_text, cta } = req.body || {};
     if (!prompt) return res.status(400).json({ error: 'Write a prompt first.' });
-    const { provider, operationName } = await startVideo(prompt, { aspectRatio });
+    const { provider, operationName } = await startVideo(prompt, { aspectRatio, referenceImage });
     const { rows } = await q(
       `INSERT INTO creatives (kind, prompt, headline, primary_text, cta, provider, video_status, video_operation_name, user_id)
        VALUES ('video',$1,$2,$3,$4,$5,'pending',$6,$7) RETURNING *`,
