@@ -173,6 +173,32 @@ input::placeholder, textarea::placeholder { color: var(--muted-2); }
 }
 .sidebar-btn .conn-dot { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; }
 
+/* Unread WhatsApp message count — green pill, used in the sidebar, on board
+   cards and in table rows. */
+.unread-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 17px; height: 17px; padding: 0 5px;
+  border-radius: 9px;
+  background: var(--good); color: #fff;
+  font-family: var(--mono); font-size: 10px; font-weight: 700; line-height: 1;
+}
+.sidebar-btn .unread-badge { margin-left: 6px; }
+.lead.has-unread { border-color: var(--good); box-shadow: 0 0 0 1px var(--good) inset; }
+.lead .top-row .unread-badge { align-self: center; }
+tr.has-unread .name { font-weight: 700; }
+
+/* "UNREAD (n)" pill in the board bar — click to float unread leads to the top. */
+.unread-toggle {
+  font: inherit; letter-spacing: inherit;
+  border: 1px solid var(--good); border-radius: 999px;
+  padding: 2px 10px;
+  background: var(--good-soft); color: var(--good);
+  cursor: pointer;
+}
+.unread-toggle:hover:not(:disabled) { background: var(--good); color: #fff; }
+.unread-toggle.on { background: var(--good); color: #fff; }
+.unread-toggle:disabled { border-color: var(--line); background: transparent; color: var(--muted-2); cursor: default; }
+
 .sidebar-foot {
   margin-top: auto;
   padding: 14px 16px;
@@ -611,6 +637,8 @@ input::placeholder, textarea::placeholder { color: var(--muted-2); }
   white-space: nowrap;
 }
 .wa-bubble img, .wa-bubble video { max-width: 100%; border-radius: 5px; display: block; margin-bottom: 4px; }
+.wa-tick { margin-left: 3px; color: rgba(17, 27, 33, .45); letter-spacing: -2px; }
+.wa-tick.read { color: #53bdeb; }
 
 .wa-composer {
   display: flex;

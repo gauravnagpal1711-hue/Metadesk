@@ -231,11 +231,16 @@ export default function LeadTable({ filters, query, stages, onOpenLead, reloadSi
             {data.rows.map((lead) => {
               const stage = stageById[lead.stage_id];
               return (
-                <tr key={lead.id} onClick={() => onOpenLead(lead.id)} style={{ cursor: 'pointer' }}>
+                <tr key={lead.id} onClick={() => onOpenLead(lead.id)} style={{ cursor: 'pointer' }} className={lead.unread_count > 0 ? 'has-unread' : ''}>
                   <td onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(lead.id)} onChange={() => toggleRow(lead.id)} aria-label={`Select ${lead.full_name || 'lead'}`} />
                   </td>
                   <td className="name">
+                    {lead.unread_count > 0 && (
+                      <span className="unread-badge" style={{ marginRight: 6 }} title={`${lead.unread_count} unread WhatsApp message${lead.unread_count === 1 ? '' : 's'}`}>
+                        {lead.unread_count}
+                      </span>
+                    )}
                     {lead.full_name || 'Unnamed lead'}
                     {lead.open_task_count > 0 && <span className="tag warn" style={{ marginLeft: 6 }}>{lead.open_task_count}</span>}
                   </td>

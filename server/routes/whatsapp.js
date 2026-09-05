@@ -1,7 +1,9 @@
 import express from 'express';
 import { q, getSetting, setSetting } from '../db.js';
 import { parseWebhook, downloadCloudMedia } from '../services/whatsappCloud.js';
-import { startWeb, logoutWeb, webStatus, onWebMessage, onHistorySync } from '../services/whatsappWeb.js';
+import {
+  startWeb, logoutWeb, webStatus, onWebMessage, onHistorySync, onQuickReplySync, syncPhoneQuickReplies, onMessageStatus
+} from '../services/whatsappWeb.js';
 import { normalisePhone } from '../services/meta.js';
 import {
   loadWaConnection, saveWaConnection, userIdForPhoneNumberId, verifyTokenMatches
@@ -173,8 +175,43 @@ async function ingestHistoryBatch(userId, items) {
   }
 }
 
+/** Keyed by shortcut (unique on the phone) rather than the sync entry's
+ *  timestamp id, since editing a quick reply on the phone writes a fresh id. */
+async function ingestQuickReply(userId, item) {
+  const shortcut = item.shortcut;
+  if (!shortcut) return;
+  const list = await getSetting(userId, 'wa_phone_quick_replies', []);
+  const idx = list.findIndex((q) => q.shortcut === shortcut);
+  if (item.deleted) {
+    if (idx === -1) return;
+    list.splice(idx, 1);
+    await setSetting(userId, 'wa_phone_quick_replies', list);
+    return;
+  }
+  if (!item.message) return;
+  const entry = { shortcut, message: item.message, keywords: item.keywords || [], synced_at: new Date().toISOString() };
+  if (idx === -1) list.push(entry); else list[idx] = entry;
+  await setSetting(userId, 'wa_phone_quick_replies', list);
+}
+
+const STATUS_RANK = { sent: 1, delivered: 2, read: 3 };
+
+/** Delivery acks can arrive out of order; never let a late 'sent' echo undo an
+ *  already-recorded 'read'. */
+async function ingestStatusUpdate(userId, { wa_message_id, status }) {
+  if (!wa_message_id || !STATUS_RANK[status]) return;
+  await q(
+    `UPDATE messages SET status = $1
+     WHERE wa_message_id = $2 AND user_id = $3
+       AND COALESCE(array_position(ARRAY['sent','delivered','read'], status), 0) <= $4`,
+    [status, wa_message_id, userId, STATUS_RANK[status]]
+  );
+}
+
 onWebMessage(ingestIncoming);
 onHistorySync(ingestHistoryBatch);
+onQuickReplySync(ingestQuickReply);
+onMessageStatus(ingestStatusUpdate);
 
 /* ---------- per-user status + config ---------- */
 
@@ -312,6 +349,25 @@ whatsappRouter.delete('/templates/:id', async (req, res, next) => {
     const updated = list.filter((t) => t.id !== req.params.id);
     await setSetting(req.user.id, 'wa_message_templates', updated);
     res.json(updated);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/* ---------- quick replies configured on the linked phone (WhatsApp Business
+   app > Settings > Business tools > Quick replies), read-only mirror ---------- */
+
+whatsappRouter.get('/quick-replies', async (req, res, next) => {
+  try {
+    res.json(await getSetting(req.user.id, 'wa_phone_quick_replies', []));
+  } catch (e) {
+    next(e);
+  }
+});
+
+whatsappRouter.post('/quick-replies/sync', async (req, res, next) => {
+  try {
+    res.json(await syncPhoneQuickReplies(req.user.id));
   } catch (e) {
     next(e);
   }

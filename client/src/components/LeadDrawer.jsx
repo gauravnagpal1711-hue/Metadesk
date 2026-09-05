@@ -43,6 +43,12 @@ function MessageMedia({ mime, data }) {
   );
 }
 
+function Ticks({ status }) {
+  if (status === 'read') return <span className="wa-tick read">✓✓</span>;
+  if (status === 'delivered') return <span className="wa-tick">✓✓</span>;
+  return <span className="wa-tick">✓</span>;
+}
+
 function dayLabel(iso) {
   const d = new Date(iso);
   const a = new Date(); a.setHours(0, 0, 0, 0);
@@ -98,6 +104,14 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
 
   // Reply suggestions belong to one lead's thread — drop them when switching leads.
   useEffect(() => { setSuggestions([]); }, [leadId]);
+
+  // Seeing the chat = reading it. Clear the unread badge; the board/table
+  // refresh on drawer close (Leads.jsx onClose -> reloadAll).
+  useEffect(() => {
+    if (data && view === 'chat' && data.lead?.unread_count > 0) {
+      api.post(`/leads/${leadId}/read`).catch(() => {});
+    }
+  }, [data, view, leadId]);
 
   useEffect(() => {
     if (view === 'chat') endRef.current?.scrollIntoView({ block: 'end' });
@@ -532,7 +546,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
                         )}
                         <span className="wa-meta">
                           {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          {m.direction === 'out' ? ' ✓' : ''}
+                          {m.direction === 'out' && <Ticks status={m.status} />}
                         </span>
                       </div>
                     </div>

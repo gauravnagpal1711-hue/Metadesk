@@ -24,6 +24,7 @@ export default function App() {
   const [tab, setTab] = useState('leads');
   const [query, setQuery] = useState('');
   const [leadCount, setLeadCount] = useState(null);
+  const [unreadTotal, setUnreadTotal] = useState(0);
   const [campaigns, setCampaigns] = useState([]);
   const [campaignsConn, setCampaignsConn] = useState({ connected: false });
   const [fbConnected, setFbConnected] = useState(false);
@@ -66,6 +67,7 @@ export default function App() {
 
   const onBoardLoaded = useCallback((leads) => {
     setLeadCount(leads.length);
+    setUnreadTotal(leads.reduce((n, l) => n + (l.unread_count || 0), 0));
     setLastSyncedAt(new Date());
   }, []);
 
@@ -121,6 +123,11 @@ export default function App() {
             >
               {t.label}
               {t.id === 'leads' && leadCount != null && <span className="count">{leadCount}</span>}
+              {t.id === 'leads' && unreadTotal > 0 && (
+                <span className="unread-badge" title={`${unreadTotal} unread WhatsApp message${unreadTotal === 1 ? '' : 's'}`}>
+                  {unreadTotal}
+                </span>
+              )}
               {t.id === 'facebook' && (
                 <span className="conn-dot" style={{ background: fbConnected ? 'var(--good)' : 'var(--muted-2)' }} />
               )}

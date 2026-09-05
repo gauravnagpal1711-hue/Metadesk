@@ -104,6 +104,9 @@ ALTER TABLE leads ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS stage_changed_at TIMESTAMPTZ NOT NULL DEFAULT now();
 -- Click-to-WhatsApp ad this lead came from: { title, body, source_url, source_id, thumbnail }
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS ad_referral JSONB;
+-- Last time the user opened this lead's WhatsApp chat in the app. Inbound
+-- messages newer than this count as unread (see LEAD_ENRICH.unread_count).
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS wa_last_read_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS leads_stage_idx ON leads(stage_id);
 CREATE INDEX IF NOT EXISTS leads_phone_idx ON leads(phone);
@@ -127,6 +130,9 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_mime TEXT;
 -- Extra WhatsApp payload: { reply_to:{body,fromMe}, ad_reply:{title,body,source_url},
 -- subtype, buttons:[{text,url}] } — lets the app mirror the phone conversation.
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS meta JSONB;
+-- Outbound delivery state from WhatsApp Web's ack events: sent | delivered | read.
+-- Inbound messages stay 'sent' (unused) — only outbound ticks are rendered.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'sent';
 
 CREATE INDEX IF NOT EXISTS messages_lead_idx ON messages(lead_id, created_at);
 

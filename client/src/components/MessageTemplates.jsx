@@ -26,16 +26,45 @@ export default function MessageTemplates({ lead, onInsert }) {
   const [draft, setDraft] = useState(BLANK);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [phoneList, setPhoneList] = useState([]);
+  const [syncing, setSyncing] = useState(false);
   const ref = useRef(null);
 
   useOutsideClick(ref, open, () => { setOpen(false); resetForm(); });
 
   useEffect(() => {
     if (!open || loaded) return;
-    api.get('/whatsapp/templates')
-      .then((r) => { setList(Array.isArray(r) ? r : []); setLoaded(true); })
+    Promise.all([
+      api.get('/whatsapp/templates'),
+      api.get('/whatsapp/quick-replies').catch(() => [])
+    ])
+      .then(([templates, phone]) => {
+        setList(Array.isArray(templates) ? templates : []);
+        setPhoneList(Array.isArray(phone) ? phone : []);
+        setLoaded(true);
+      })
       .catch((e) => setError(e.message));
   }, [open, loaded]);
+
+  async function syncFromPhone() {
+    setSyncing(true);
+    setError('');
+    try {
+      await api.post('/whatsapp/quick-replies/sync');
+      // The phone reports its quick replies back asynchronously; re-poll a few times.
+      let got = phoneList.length;
+      for (let i = 0; i < 6; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const fresh = await api.get('/whatsapp/quick-replies');
+        setPhoneList(Array.isArray(fresh) ? fresh : []);
+        if (fresh.length !== got) { got = fresh.length; break; }
+      }
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   function resetForm() {
     setManage(false);
@@ -118,6 +147,32 @@ export default function MessageTemplates({ lead, onInsert }) {
               <button type="button" className="btn sm" style={{ marginTop: 6 }} onClick={() => { setManage(true); setEditingId(null); setDraft(BLANK); }}>
                 + New template
               </button>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '10px 0 4px', paddingTop: 8, borderTop: '1px solid var(--line)' }}>
+                <span className="mono-label" style={{ flex: 1 }}>From your phone</span>
+                <button type="button" className="btn ghost sm" onClick={syncFromPhone} disabled={syncing}>
+                  {syncing ? 'Syncing…' : 'Sync'}
+                </button>
+              </div>
+              {phoneList.length === 0 && (
+                <div className="empty-mini">
+                  No quick replies synced yet — set some up in WhatsApp Business (Settings → Business tools → Quick replies), then tap Sync.
+                </div>
+              )}
+              {phoneList.map((q) => (
+                <button
+                  key={q.shortcut}
+                  type="button"
+                  className="btn ghost sm"
+                  style={{ display: 'block', width: '100%', textAlign: 'left', whiteSpace: 'normal', height: 'auto', padding: '5px 7px', marginBottom: 2 }}
+                  onClick={() => { onInsert(fillTemplate(q.message, lead)); setOpen(false); }}
+                >
+                  <strong style={{ display: 'block' }}>/{q.shortcut}</strong>
+                  <span style={{ color: 'var(--muted)', fontSize: 12 }}>
+                    {q.message.slice(0, 90)}{q.message.length > 90 ? '…' : ''}
+                  </span>
+                </button>
+              ))}
             </>
           ) : (
             <div style={{ display: 'grid', gap: 6 }}>

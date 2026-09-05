@@ -13,6 +13,9 @@ export const leadsRouter = express.Router();
 /** Per-lead computed columns shared by the board feed and the table (list) feed. */
 const LEAD_ENRICH = `
   (SELECT count(*)::int FROM messages m WHERE m.lead_id = l.id) AS message_count,
+  (SELECT count(*)::int FROM messages m
+     WHERE m.lead_id = l.id AND m.direction = 'in' AND m.channel = 'whatsapp'
+       AND (l.wa_last_read_at IS NULL OR m.created_at > l.wa_last_read_at)) AS unread_count,
   (SELECT count(*)::int FROM remarks r WHERE r.lead_id = l.id) AS remark_count,
   (SELECT max(created_at) FROM messages m WHERE m.lead_id = l.id) AS last_message_at,
   (SELECT count(*)::int FROM tasks t WHERE t.lead_id = l.id AND t.done = false) AS open_task_count,
@@ -625,7 +628,25 @@ leadsRouter.get('/:id', async (req, res, next) => {
     const { rows: remarks } = await q('SELECT * FROM remarks WHERE lead_id=$1 AND user_id=$2 ORDER BY created_at DESC', [req.params.id, uid]);
     const { rows: activity } = await q('SELECT * FROM activity WHERE lead_id=$1 AND user_id=$2 ORDER BY created_at DESC LIMIT 50', [req.params.id, uid]);
     const { rows: tasks } = await q('SELECT * FROM tasks WHERE lead_id=$1 AND user_id=$2 ORDER BY done ASC, due_at ASC NULLS LAST, created_at DESC', [req.params.id, uid]);
-    res.json({ lead: rows[0], messages, remarks, activity, tasks });
+    const lastRead = rows[0].wa_last_read_at ? new Date(rows[0].wa_last_read_at) : null;
+    const unread_count = messages.filter(
+      (m) => m.direction === 'in' && m.channel === 'whatsapp' && (!lastRead || new Date(m.created_at) > lastRead)
+    ).length;
+    res.json({ lead: { ...rows[0], unread_count }, messages, remarks, activity, tasks });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Mark this lead's WhatsApp chat as read up to now — clears its unread badge. */
+leadsRouter.post('/:id/read', async (req, res, next) => {
+  try {
+    const { rowCount } = await q(
+      'UPDATE leads SET wa_last_read_at = now() WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+    if (!rowCount) return res.status(404).json({ error: 'Lead not found.' });
+    res.json({ ok: true });
   } catch (e) {
     next(e);
   }
@@ -1011,27 +1032,43 @@ leadsRouter.post('/:id/messages', async (req, res, next) => {
     const { rows: lead } = await q('SELECT * FROM leads WHERE id=$1 AND user_id=$2', [req.params.id, uid]);
     if (!lead.length) return res.status(404).json({ error: 'Lead not found.' });
 
+    const phone = lead[0].phone;
+    const wa = await loadWaConnection(uid);
+    const haveCloud = cloudConfigured(wa.cloud);
+    const haveWeb = webStatus(uid).status === 'connected';
+    if (!haveCloud && !haveWeb) {
+      return res.status(409).json({ error: 'WhatsApp is not connected. Pair a device on the WhatsApp tab first.' });
+    }
+
+    // Try each available transport; the first that succeeds wins. Cloud API is
+    // tried first when configured, but a failure there (e.g. an unverified
+    // number or a stale token) falls back to the paired WhatsApp Web device
+    // instead of being silently swallowed.
+    const opts = { mediaData, mimeType: mediaMime, caption: body || undefined, fileName };
+    const transports = [];
+    if (haveCloud) {
+      transports.push(['Cloud API', () => (mediaData ? sendMedia(wa.cloud, phone, opts) : sendText(wa.cloud, phone, body))]);
+    }
+    if (haveWeb) {
+      transports.push(['WhatsApp Web', () => (mediaData ? sendWebMedia(uid, phone, opts) : sendWebText(uid, phone, body))]);
+    }
+
     let waMessageId = null;
-    try {
-      const phone = lead[0].phone;
-      const wa = await loadWaConnection(uid);
-      if (mediaData) {
-        const opts = { mediaData, mimeType: mediaMime, caption: body || undefined, fileName };
-        const sent = cloudConfigured(wa.cloud)
-          ? await sendMedia(wa.cloud, phone, opts)
-          : webStatus(uid).status === 'connected'
-            ? await sendWebMedia(uid, phone, opts)
-            : null;
-        waMessageId = sent?.id || null;
-      } else if (cloudConfigured(wa.cloud)) {
-        const sent = await sendText(wa.cloud, phone, body);
-        waMessageId = sent?.id || null;
-      } else if (webStatus(uid).status === 'connected') {
-        const sent = await sendWebText(uid, phone, body);
-        waMessageId = sent?.id || null;
+    let sentVia = null;
+    const failures = [];
+    for (const [label, run] of transports) {
+      try {
+        const sent = await run();
+        if (sent?.id) { waMessageId = sent.id; sentVia = label; break; }
+        failures.push(`${label}: no message id returned`);
+      } catch (e) {
+        failures.push(`${label}: ${e.message}`);
       }
-    } catch (e) {
-      console.error('WhatsApp send failed:', e.message);
+    }
+
+    if (!waMessageId) {
+      console.error('WhatsApp send failed:', failures.join(' | '));
+      return res.status(502).json({ error: `Could not send on WhatsApp. ${failures.join(' ')}`.trim() });
     }
 
     const { rows } = await q(
@@ -1040,7 +1077,7 @@ leadsRouter.post('/:id/messages', async (req, res, next) => {
     );
     await q('UPDATE leads SET last_contacted_at = now(), updated_at = now() WHERE id = $1', [req.params.id]);
 
-    res.json(rows[0]);
+    res.json({ ...rows[0], sent_via: sentVia });
   } catch (e) {
     next(e);
   }

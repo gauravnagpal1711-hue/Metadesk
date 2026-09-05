@@ -52,6 +52,7 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
   const [layout, setLayout] = useState(() => localStorage.getItem(LAYOUT_KEY) || 'board');
   const [filters, setFilters] = useState({ ...EMPTY_FILTERS });
   const [tableReload, setTableReload] = useState(0);
+  const [unreadFirst, setUnreadFirst] = useState(false);
 
   const load = useCallback(async () => {
     const board = await api.get('/leads/board');
@@ -112,6 +113,15 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
   );
 
   const wonCount = leads.filter((l) => stages.find((s) => s.id === l.stage_id)?.is_won).length;
+  const unreadTotal = useMemo(
+    () => visibleLeads.reduce((n, l) => n + (l.unread_count || 0), 0),
+    [visibleLeads]
+  );
+
+  // Auto-clear the "unread first" pin once everything visible has been read.
+  useEffect(() => {
+    if (unreadFirst && unreadTotal === 0) setUnreadFirst(false);
+  }, [unreadFirst, unreadTotal]);
 
   return (
     <>
@@ -120,8 +130,17 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
           <button className={`btn sm ${layout === 'board' ? 'primary' : ''}`} onClick={() => setLayoutPersist('board')}>Board</button>
           <button className={`btn sm ${layout === 'table' ? 'primary' : ''}`} onClick={() => setLayoutPersist('table')}>Table</button>
         </div>
-        <div className="mono-label" style={{ textTransform: 'uppercase' }}>
-          {leads.length} LEADS · {wonCount} WON · {stages.length} STAGES
+        <div className="mono-label" style={{ textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
+            type="button"
+            className={`unread-toggle ${unreadFirst ? 'on' : ''}`}
+            onClick={() => setUnreadFirst((v) => !v)}
+            disabled={unreadTotal === 0}
+            title={unreadTotal ? 'Bring leads with unread WhatsApp messages to the top' : 'No unread messages'}
+          >
+            UNREAD ({unreadTotal})
+          </button>
+          <span>· {wonCount} WON · {stages.length} STAGES</span>
         </div>
         <div className="board-bar-actions">
           <SavedViews
@@ -157,6 +176,7 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
         <LeadBoard
           stages={stages}
           leads={visibleLeads}
+          unreadFirst={unreadFirst}
           onOpenLead={setOpenId}
           onReload={reloadAll}
           setError={setError}

@@ -41,6 +41,23 @@ export function onWebMessage(handler) { onIncoming = handler; }
 let onHistory = async () => {};
 export function onHistorySync(handler) { onHistory = handler; }
 
+// handler(userId, { id, shortcut, message, keywords, deleted })
+let onQuickReply = async () => {};
+export function onQuickReplySync(handler) { onQuickReply = handler; }
+
+// handler(userId, { wa_message_id, status: 'sent'|'delivered'|'read' })
+let onStatusUpdate = async () => {};
+export function onMessageStatus(handler) { onStatusUpdate = handler; }
+
+// Baileys' proto.WebMessageInfo.Status enum: ERROR=0, PENDING=1, SERVER_ACK=2,
+// DELIVERY_ACK=3, READ=4, PLAYED=5 (a voice note being played counts as read).
+function ackToStatus(n) {
+  if (n >= 4) return 'read';
+  if (n === 3) return 'delivered';
+  if (n === 2) return 'sent';
+  return null; // PENDING/ERROR: not worth overwriting what we already show
+}
+
 export function webStatus(userId) {
   const s = sessions.get(userId) || blankSession();
   return {
@@ -310,6 +327,22 @@ export async function startWeb(userId) {
     }
   });
 
+  // Custom event added by patches/@whiskeysockets+baileys+*.patch — Baileys
+  // decodes the phone's "quick reply" app-state entries but otherwise discards
+  // them, since it has no built-in event for WhatsApp Business quick replies.
+  sock.ev.on('quick-reply.edit', (item) => {
+    onQuickReply(userId, item).catch((e) => console.error('Quick reply sync handler failed:', e.message));
+  });
+
+  sock.ev.on('messages.update', (updates) => {
+    for (const { key, update } of updates) {
+      if (!key.fromMe || update.status == null) continue;
+      const status = ackToStatus(update.status);
+      if (!status) continue;
+      onStatusUpdate(userId, { wa_message_id: key.id, status }).catch((e) => console.error('Message status update failed:', e.message));
+    }
+  });
+
   sock.ev.on('messaging-history.set', async ({ messages, isLatest, syncType }) => {
     const onDemand = syncType === 3 || syncType === 'ON_DEMAND';
     const batch = (await Promise.all((messages || []).map(extractMessage))).filter(Boolean);
@@ -354,6 +387,24 @@ export async function fetchChatHistory(userId, phone, anchor, count = 50) {
   console.log(`[WhatsApp u${userId}] fetchMessageHistory count=${count} chat=${jid} beforeId=${key.id} beforeTs=${tsMs}`);
   const res = await s.sock.fetchMessageHistory(Math.min(count, 50), key, tsMs);
   return { requested: true, ref: res || null };
+}
+
+/**
+ * Ask the phone for its full current set of WhatsApp Business "quick replies"
+ * (Business app > Settings > Business tools > Quick replies). These live in
+ * the 'regular' app-state collection Baileys already keeps in sync going
+ * forward (edits made on the phone after this call arrive live), but Baileys
+ * only fetches *changes since last sync* — so a phone already linked before
+ * this feature existed needs one forced from-scratch resync to see quick
+ * replies that were created earlier. Results arrive asynchronously via the
+ * 'quick-reply.edit' event, same as fetchChatHistory's older-messages flow.
+ */
+export async function syncPhoneQuickReplies(userId) {
+  const s = sessions.get(userId);
+  if (!s || s.status !== 'connected' || !s.sock) throw new Error('WhatsApp Web is not connected.');
+  await s.sock.authState.keys.set({ 'app-state-sync-version': { regular: null } });
+  await s.sock.resyncAppState(['regular'], false);
+  return { requested: true };
 }
 
 export async function sendWebText(userId, phone, body) {

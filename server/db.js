@@ -180,6 +180,16 @@ export async function initDb() {
       }
       await setSetting(firstUserId, 'migrated_followup_stage', true);
     }
+
+    // Unread WhatsApp badge: stamp every existing lead as "read up to now" once,
+    // so history doesn't come back as a wall of unread. New inbound messages
+    // after this point light up the badge normally.
+    const readBackfilled = await getSetting(firstUserId, 'migrated_wa_read_backfill', false);
+    if (!readBackfilled) {
+      await q(`UPDATE leads SET wa_last_read_at = now() WHERE wa_last_read_at IS NULL`);
+      await setSetting(firstUserId, 'migrated_wa_read_backfill', true);
+      console.log('Backfilled wa_last_read_at for existing leads.');
+    }
   }
 }
 

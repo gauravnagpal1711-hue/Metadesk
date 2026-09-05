@@ -27,7 +27,7 @@ function sortOptionsFor(stage) {
 }
 
 /** The Kanban layout. `leads` arrives already filtered by the container. */
-export default function LeadBoard({ stages, leads, onOpenLead, onReload, setError }) {
+export default function LeadBoard({ stages, leads, unreadFirst = false, onOpenLead, onReload, setError }) {
   const [dragId, setDragId] = useState(null);
   const [overStage, setOverStage] = useState(null);
   const [sortState, setSortState] = useState({});
@@ -124,7 +124,13 @@ export default function LeadBoard({ stages, leads, onOpenLead, onReload, setErro
       <div className="board">
         {stages.map((stage) => {
           const stageLeads = leads.filter((l) => l.stage_id === stage.id);
-          const items = sortLeads(stageLeads, stage);
+          let items = sortLeads(stageLeads, stage);
+          if (unreadFirst) {
+            // Stable partition: unread leads to the top, each group keeps its sort.
+            items = [...items].sort(
+              (a, b) => (b.unread_count > 0 ? 1 : 0) - (a.unread_count > 0 ? 1 : 0)
+            );
+          }
           const value = stageLeads.reduce((a, l) => a + Number(l.value || 0), 0);
           const sort = resolvedSort(stage);
           return (
@@ -167,13 +173,21 @@ export default function LeadBoard({ stages, leads, onOpenLead, onReload, setErro
                   return (
                     <article
                       key={lead.id}
-                      className={`lead ${dragId === lead.id ? 'dragging' : ''}`}
+                      className={`lead ${dragId === lead.id ? 'dragging' : ''} ${lead.unread_count > 0 ? 'has-unread' : ''}`}
                       draggable
                       onDragStart={() => setDragId(lead.id)}
                       onDragEnd={() => setDragId(null)}
                       onClick={() => onOpenLead(lead.id)}
                     >
                       <div className="top-row">
+                        {lead.unread_count > 0 && (
+                          <span
+                            className="unread-badge"
+                            title={`${lead.unread_count} unread WhatsApp message${lead.unread_count === 1 ? '' : 's'}`}
+                          >
+                            {lead.unread_count}
+                          </span>
+                        )}
                         <span className="who">{lead.full_name || 'Unnamed lead'}</span>
                         <span className="age">{when(lead.created_at)}</span>
                       </div>

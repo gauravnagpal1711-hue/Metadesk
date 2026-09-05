@@ -1,0 +1,21 @@
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Utils/chat-utils.js b/node_modules/@whiskeysockets/baileys/lib/Utils/chat-utils.js
+index c30265d..f93b1c6 100644
+--- a/node_modules/@whiskeysockets/baileys/lib/Utils/chat-utils.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Utils/chat-utils.js
+@@ -795,6 +795,16 @@ export const processSyncAction = (syncAction, ev, me, initialSyncOpts, logger) =
+                 }
+         });
+     }
++    else if (action?.quickReplyAction) {
++        const { message, shortcut, keywords, deleted } = action.quickReplyAction;
++        ev.emit('quick-reply.edit', {
++            id,
++            message: message || null,
++            shortcut: shortcut || null,
++            keywords: keywords || [],
++            deleted: !!deleted
++        });
++    }
+     else if (action?.localeSetting?.locale) {
+         ev.emit('settings.update', { setting: 'locale', value: action.localeSetting.locale });
+     }
