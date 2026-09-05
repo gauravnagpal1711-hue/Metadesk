@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, when, money } from '../api.js';
-import { bucketOf, shortDateTime } from '../lib/dateBuckets.js';
+import EditableDateChip from './EditableDateChip.jsx';
 
 const PAGE_SIZE = 50;
 
@@ -102,6 +102,16 @@ export default function LeadTable({ filters, query, stages, onOpenLead, reloadSi
     } catch (e) {
       setError(e.message);
       load();
+    }
+  }
+
+  async function saveDate(id, field, iso) {
+    try {
+      await api.patch(`/leads/${id}`, { [field]: iso });
+      await load();
+      onChanged?.();
+    } catch (e) {
+      setError(e.message);
     }
   }
 
@@ -270,11 +280,15 @@ export default function LeadTable({ filters, query, stages, onOpenLead, reloadSi
                     {(lead.tags || []).length === 0 ? '—' : lead.tags.map((t) => <span key={t} className="tag off">{t}</span>)}
                   </td>
                   <td style={{ whiteSpace: 'nowrap' }}>{lead.last_contacted_at ? when(lead.last_contacted_at) : '—'}</td>
-                  <td style={{ whiteSpace: 'nowrap' }}>
-                    {lead.followup_date ? <span className={`date-chip ${bucketOf(lead.followup_date)}`}>{shortDateTime(lead.followup_date)}</span> : '—'}
+                  <td style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                    {lead.followup_date
+                      ? <EditableDateChip value={lead.followup_date} icon="⏰" onSave={(iso) => saveDate(lead.id, 'followup_date', iso)} />
+                      : '—'}
                   </td>
-                  <td style={{ whiteSpace: 'nowrap' }}>
-                    {lead.appointment_date ? <span className={`date-chip ${bucketOf(lead.appointment_date)}`}>{shortDateTime(lead.appointment_date)}</span> : '—'}
+                  <td style={{ whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                    {lead.appointment_date
+                      ? <EditableDateChip value={lead.appointment_date} icon="📅" onSave={(iso) => saveDate(lead.id, 'appointment_date', iso)} />
+                      : '—'}
                   </td>
                   <td style={{ whiteSpace: 'nowrap' }}>{when(lead.created_at)}</td>
                 </tr>

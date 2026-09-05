@@ -39,3 +39,13 @@ export function shortDateTime(iso) {
   if (Number.isNaN(d.getTime())) return '';
   return d.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
+
+/** Converts a stored ISO timestamp into the "YYYY-MM-DDTHH:mm" shape a
+ * datetime-local input expects, in the viewer's local time. */
+export function toDatetimeLocal(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}

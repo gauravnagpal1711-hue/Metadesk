@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, when } from '../api.js';
-import { bucketOf, shortDateTime } from '../lib/dateBuckets.js';
+import { bucketOf, shortDateTime, toDatetimeLocal } from '../lib/dateBuckets.js';
 import MessageTemplates from './MessageTemplates.jsx';
 
 const TASK_KINDS = ['todo', 'call', 'meeting', 'whatsapp', 'email'];
@@ -20,15 +20,6 @@ function Linkified({ text }) {
       <span key={i}>{part}</span>
     )
   );
-}
-
-/** Converts a stored ISO timestamp into the "YYYY-MM-DDTHH:mm" shape a
- * datetime-local input expects, in the viewer's local time. */
-function toDatetimeLocal(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function MessageMedia({ mime, data }) {

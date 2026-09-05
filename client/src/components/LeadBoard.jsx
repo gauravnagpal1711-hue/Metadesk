@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api, when } from '../api.js';
-import { bucketOf, shortDateTime } from '../lib/dateBuckets.js';
+import EditableDateChip from './EditableDateChip.jsx';
 
 const DEFAULT_SORT = { field: 'created', dir: 'desc' };
 const SORT_FIELD_KEYS = {
@@ -112,6 +112,15 @@ export default function LeadBoard({ stages, leads, unreadFirst = false, onOpenLe
     }
   }
 
+  async function saveDate(leadId, field, iso) {
+    try {
+      await api.patch(`/leads/${leadId}`, { [field]: iso });
+      onReload();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
   function copyPhone(e, phone, id) {
     e.stopPropagation();
     navigator.clipboard?.writeText(phone);
@@ -168,8 +177,6 @@ export default function LeadBoard({ stages, leads, unreadFirst = false, onOpenLe
 
               <div className="col-body">
                 {items.map((lead) => {
-                  const fBucket = bucketOf(lead.followup_date);
-                  const aBucket = bucketOf(lead.appointment_date);
                   return (
                     <article
                       key={lead.id}
@@ -215,12 +222,16 @@ export default function LeadBoard({ stages, leads, unreadFirst = false, onOpenLe
                           {lead.tags.map((t) => <span key={t} className="tag off">{t}</span>)}
                         </div>
                       )}
-                      {lead.appointment_date && (
-                        <div className={`date-chip ${aBucket}`}>📅 {shortDateTime(lead.appointment_date)}</div>
-                      )}
-                      {lead.followup_date && (
-                        <div className={`date-chip ${fBucket}`}>⏰ {shortDateTime(lead.followup_date)}</div>
-                      )}
+                      <EditableDateChip
+                        value={lead.appointment_date}
+                        icon="📅"
+                        onSave={(iso) => saveDate(lead.id, 'appointment_date', iso)}
+                      />
+                      <EditableDateChip
+                        value={lead.followup_date}
+                        icon="⏰"
+                        onSave={(iso) => saveDate(lead.id, 'followup_date', iso)}
+                      />
                       <div className="row">
                         {lead.message_count > 0 && <span className="tag">{lead.message_count} msg</span>}
                         <span className="tag off">{lead.remark_count || 0} note</span>

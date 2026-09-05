@@ -862,6 +862,13 @@ a.wa-btn:hover { background: rgba(0, 168, 132, .2); }
 .date-chip.today   { background: var(--warn-soft);   color: var(--warn); }
 .date-chip.soon    { background: var(--accent-soft);  color: var(--accent-hover); }
 .date-chip.future  { background: var(--good-soft);    color: var(--good); }
+.date-chip:hover { filter: brightness(0.95); cursor: pointer; }
+
+.date-chip-edit {
+  font-family: var(--mono); font-size: 10.5px; font-weight: 600;
+  padding: 1px 5px; border-radius: var(--r-pill);
+  border: 1px solid var(--accent); width: auto; height: auto;
+}
 
 .lead-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0; }
 
