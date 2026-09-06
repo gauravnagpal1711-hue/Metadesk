@@ -290,11 +290,19 @@ campaignBriefsRouter.post('/:id/launch', async (req, res, next) => {
       const objective = dest === 'lead_form' ? 'OUTCOME_LEADS' : brief.objective;
       ({ id: campaignId } = await createCampaign(conn, { name: brief.name, objective }));
       step = 'ad set';
+      // A brief flipped from WhatsApp to lead-form keeps its old
+      // optimization_goal (e.g. CONVERSATIONS) in the saved audience — that's
+      // invalid for an Instant Form ad set, so only pass a lead-valid goal.
+      const LEAD_GOALS = ['LEAD_GENERATION', 'QUALITY_LEAD'];
+      const savedGoal = audience.advanced?.optimization_goal;
+      const optimizationGoal = dest === 'lead_form'
+        ? (LEAD_GOALS.includes(savedGoal) ? savedGoal : 'LEAD_GENERATION')
+        : savedGoal;
       ({ id: adsetId } = await createAdSet(conn, {
         name: `${brief.name} — ad set`,
         campaignId,
         dailyBudgetRupees: brief.daily_budget,
-        optimizationGoal: audience.advanced?.optimization_goal,
+        optimizationGoal,
         bidCapRupees: audience.advanced?.bid_cap_rupees,
         pageId: conn.pageId,
         targeting,
