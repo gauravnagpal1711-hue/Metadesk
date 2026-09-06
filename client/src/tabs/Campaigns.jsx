@@ -38,13 +38,24 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
     [briefs]
   );
 
-  // Briefs that aren't yet represented by a synced Meta campaign row — shown as
-  // paused placeholder rows in the main table so a ready campaign "lands" here.
+  // Meta campaigns still represented by a 'created' brief row above — hide the
+  // synced duplicate until the brief goes live.
+  const createdBriefCampaignIds = useMemo(
+    () => new Set(briefs.filter((b) => b.status === 'created' && b.meta_campaign_id).map((b) => b.meta_campaign_id)),
+    [briefs]
+  );
+
+  // Briefs shown as their own rows in the table: not yet live, and either not
+  // yet on Meta or freshly created (so the in-app "Start campaign" button stays
+  // put even after the paused campaign syncs into the list below). Once the
+  // brief is 'live' or 'archived' the synced row fully represents it.
   const syncedIds = useMemo(() => new Set(rows.map((r) => r.id)), [rows]);
   const pendingBriefs = useMemo(
-    () => briefs.filter(
-      (b) => b.status !== 'archived' && !(b.meta_campaign_id && syncedIds.has(b.meta_campaign_id))
-    ),
+    () => briefs.filter((b) => {
+      if (['live', 'archived'].includes(b.status)) return false;
+      if (b.status === 'created') return true;
+      return !(b.meta_campaign_id && syncedIds.has(b.meta_campaign_id));
+    }),
     [briefs, syncedIds]
   );
 
@@ -251,7 +262,7 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
                   </tr>
                 );
               })}
-              {rows.map((c) => (
+              {rows.filter((c) => !createdBriefCampaignIds.has(c.id)).map((c) => (
                 <tr key={c.id}>
                   <td>
                     <div className="name">
