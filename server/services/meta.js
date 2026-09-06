@@ -298,7 +298,10 @@ export async function createCampaign(conn, { name, objective }) {
 /**
  * Ad set for a brief launch, always PAUSED. `destination` picks the flavour:
  *   'whatsapp'  → CONVERSATIONS goal, WHATSAPP destination (click-to-WhatsApp)
- *   'lead_form' → LEAD_GENERATION goal, ON_AD destination (Instant Form)
+ *   'lead_form' → LEAD_GENERATION goal, no destination_type (the creative's
+ *                 lead_gen_form_id makes it an Instant Form ad). Setting
+ *                 destination_type here (ON_AD) makes Meta reject the goal
+ *                 (subcode 2490408).
  * Both promote the connected page.
  */
 export async function createAdSet(conn, {
@@ -312,11 +315,11 @@ export async function createAdSet(conn, {
     daily_budget: Math.round(Number(dailyBudgetRupees) * 100),
     billing_event: 'IMPRESSIONS',
     optimization_goal: optimizationGoal || (isLeadForm ? 'LEAD_GENERATION' : 'CONVERSATIONS'),
-    destination_type: isLeadForm ? 'ON_AD' : 'WHATSAPP',
     promoted_object: { page_id: String(pageId) },
     targeting,
     status: 'PAUSED'
   };
+  if (!isLeadForm) body.destination_type = 'WHATSAPP';
   if (bidCapRupees) {
     body.bid_amount = Math.round(Number(bidCapRupees) * 100);
     body.bid_strategy = 'LOWEST_COST_WITH_BID_CAP';

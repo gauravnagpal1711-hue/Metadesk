@@ -276,7 +276,10 @@ campaignBriefsRouter.post('/:id/launch', async (req, res, next) => {
     let campaignId, adsetId, imageHash, creativeId, adId;
     let step = 'campaign';
     try {
-      ({ id: campaignId } = await createCampaign(conn, { name: brief.name, objective: brief.objective }));
+      // Lead-form ad sets only validate against the OUTCOME_LEADS objective, so
+      // pin it (an older brief may carry a stale objective string).
+      const objective = dest === 'lead_form' ? 'OUTCOME_LEADS' : brief.objective;
+      ({ id: campaignId } = await createCampaign(conn, { name: brief.name, objective }));
       step = 'ad set';
       ({ id: adsetId } = await createAdSet(conn, {
         name: `${brief.name} — ad set`,
