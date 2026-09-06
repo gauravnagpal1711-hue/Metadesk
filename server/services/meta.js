@@ -379,10 +379,25 @@ export async function getVideoThumbnail(conn, videoId) {
 /** Click-to-WhatsApp ad creative from the page + an uploaded image or video. */
 export async function createCreative(conn, { name, pageId, message, imageHash, videoId, thumbnailUrl, waNumber }) {
   const link = `https://api.whatsapp.com/send?phone=${waNumber}`;
-  const cta = { type: 'WHATSAPP_MESSAGE', value: { app_destination: 'WHATSAPP' } };
   const spec = videoId
-    ? { video_data: { video_id: String(videoId), message: message || '', link, call_to_action: cta, image_url: thumbnailUrl } }
-    : { link_data: { message: message || '', image_hash: imageHash, link, call_to_action: cta } };
+    // video_data rejects a top-level `link` — the WhatsApp destination rides on
+    // the call_to_action value instead.
+    ? {
+        video_data: {
+          video_id: String(videoId),
+          message: message || '',
+          image_url: thumbnailUrl,
+          call_to_action: { type: 'WHATSAPP_MESSAGE', value: { app_destination: 'WHATSAPP', link } }
+        }
+      }
+    : {
+        link_data: {
+          message: message || '',
+          image_hash: imageHash,
+          link,
+          call_to_action: { type: 'WHATSAPP_MESSAGE', value: { app_destination: 'WHATSAPP' } }
+        }
+      };
   return graph(`${accountId(conn)}/adcreatives`, {
     conn,
     method: 'POST',
