@@ -17,6 +17,12 @@ const SORT_FIELD_KEYS = {
  *   - a "Contacted"-type stage → by last update, newest first
  *   - everything else (New Lead, Interested, …) → by created, newest first
  */
+/** How many ad-form fields this lead actually submitted. */
+function answerCount(fields) {
+  if (!fields || typeof fields !== 'object') return 0;
+  return Object.values(fields).filter((v) => v != null && String(v).trim() !== '').length;
+}
+
 function defaultSortFor(stage) {
   if (stage.requires_appointment_date) return { field: 'appointment', dir: 'asc' };
   if (stage.requires_followup_date) return { field: 'followup', dir: 'asc' };
@@ -250,6 +256,9 @@ export default function LeadBoard({ stages, leads, unreadFirst = false, onOpenLe
                         {lead.message_count > 0 && <span className="tag">{lead.message_count} msg</span>}
                         <span className="tag off">{lead.remark_count || 0} note</span>
                         {lead.open_task_count > 0 && <span className="tag warn">{lead.open_task_count} task</span>}
+                        {answerCount(lead.fields) > 0 && (
+                          <span className="tag off" title="Answers submitted on the ad form">📋 {answerCount(lead.fields)}</span>
+                        )}
                         {lead.last_contacted_at && <span className="city">talked {when(lead.last_contacted_at)}</span>}
                         {lead.city && <span className="city">{lead.city}</span>}
                       </div>

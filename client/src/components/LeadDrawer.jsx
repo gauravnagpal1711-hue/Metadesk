@@ -5,6 +5,39 @@ import MessageTemplates from './MessageTemplates.jsx';
 
 const TASK_KINDS = ['todo', 'call', 'meeting', 'whatsapp', 'email'];
 
+/** Turn a Meta lead-form field key ("what's_your_budget?") into a label. */
+function humanizeFieldKey(k) {
+  return String(k).replace(/[_?]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/^./, (c) => c.toUpperCase());
+}
+
+/** The lead's answers to the ad form, question → answer, newest submissions
+ *  keep every field they filled in (name/phone included — it's the record). */
+function formAnswerRows(fields) {
+  if (!fields || typeof fields !== 'object') return [];
+  return Object.entries(fields)
+    .filter(([, v]) => v != null && String(v).trim() !== '')
+    .map(([k, v]) => ({ q: humanizeFieldKey(k), a: String(v) }));
+}
+
+/** Compact read-only card of the ad-form answers, shown in the conversation. */
+function FormAnswersCard({ fields }) {
+  const rows = formAnswerRows(fields);
+  if (!rows.length) return null;
+  return (
+    <div className="notice" style={{ margin: '0 0 10px' }}>
+      <div className="mono-label" style={{ marginBottom: 6 }}>📋 Ad form answers</div>
+      <dl className="kv" style={{ margin: 0 }}>
+        {rows.map((r, i) => (
+          <div key={i} style={{ display: 'contents' }}>
+            <dt>{r.q}</dt>
+            <dd>{r.a}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
 const URL_RE = /(https?:\/\/[^\s]+)/g;
 
 /** Renders text with any http(s) URLs turned into clickable links. */
@@ -513,6 +546,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
           {view === 'chat' && (
             <>
               {lead.ad_referral && <AdCard ad={lead.ad_referral} />}
+              <FormAnswersCard fields={lead.fields} />
 
               <div style={{ textAlign: 'center', margin: '2px 0 8px', display: 'flex', gap: 6, justifyContent: 'center' }}>
                 <button className="btn ghost sm" onClick={() => loadEarlier()} disabled={loadingEarlier}>
@@ -735,14 +769,14 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
                 </div>
               )}
 
-              {lead.fields && Object.keys(lead.fields).length > 0 && (
+              {formAnswerRows(lead.fields).length > 0 && (
                 <>
-                  <div className="mono-label" style={{ margin: '4px 0 4px' }}>Form answers</div>
+                  <div className="mono-label" style={{ margin: '4px 0 4px' }}>Ad form answers</div>
                   <dl className="kv">
-                    {Object.entries(lead.fields).map(([k, v]) => (
-                      <div key={k} style={{ display: 'contents' }}>
-                        <dt>{k}</dt>
-                        <dd>{String(v)}</dd>
+                    {formAnswerRows(lead.fields).map((r, i) => (
+                      <div key={i} style={{ display: 'contents' }}>
+                        <dt>{r.q}</dt>
+                        <dd>{r.a}</dd>
                       </div>
                     ))}
                   </dl>
