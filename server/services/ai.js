@@ -13,6 +13,11 @@ import os from 'node:os';
 import path from 'node:path';
 
 export function imageProvider() {
+  // IMAGE_PROVIDER pins one provider explicitly (e.g. 'vertex' to keep image
+  // generation on Google even while OPENAI_API_KEY is still set); otherwise
+  // fall back to whichever key is configured, in priority order.
+  const forced = (process.env.IMAGE_PROVIDER || '').trim().toLowerCase();
+  if (forced) return forced;
   if (process.env.OPENAI_API_KEY) return 'openai';
   if (process.env.REPLICATE_API_TOKEN) return 'replicate';
   if (vertexConfigured()) return 'vertex';

@@ -21,7 +21,7 @@ cta TEXT,
 provider TEXT,
 image_data TEXT, -- base64 data URL
 video_url TEXT,
-status TEXT NOT NULL DEFAULT 'draft', -- draft | approved | used
+status TEXT NOT NULL DEFAULT 'draft', -- review | draft | approved | used
 label TEXT,
 cta_type TEXT,             -- Meta CTA enum, e.g. WHATSAPP_MESSAGE | SIGN_UP | LEARN_MORE
 destination_type TEXT,     -- whatsapp | lead_form | website
@@ -45,6 +45,12 @@ ALTER TABLE creatives ADD COLUMN IF NOT EXISTS campaign_defaults JSONB;
 ALTER TABLE creatives ADD COLUMN IF NOT EXISTS video_status TEXT;
 ALTER TABLE creatives ADD COLUMN IF NOT EXISTS video_operation_name TEXT;
 ALTER TABLE creatives ADD COLUMN IF NOT EXISTS video_error TEXT;
+-- A freshly generated image/video lands as status='review': it shows in the
+-- gallery as an unsaved draft until the user Saves it (→ 'draft'), Discards it
+-- (deleted), or ignores it — in which case it's auto-deleted once
+-- review_expires_at (generation time + 30 days) passes. Uploads skip 'review'.
+ALTER TABLE creatives ADD COLUMN IF NOT EXISTS review_expires_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS creatives_review_idx ON creatives(review_expires_at) WHERE status = 'review';
 
 CREATE TABLE IF NOT EXISTS campaigns (
 id TEXT PRIMARY KEY, -- Meta campaign id

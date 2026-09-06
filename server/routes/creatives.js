@@ -32,15 +32,16 @@ creativesRouter.post('/copy', async (req, res, next) => {
   }
 });
 
-/** Generate an image and store it as a draft creative. */
+/** Generate an image and store it as an unsaved 'review' draft (auto-deleted
+ *  after 30 days unless the user Saves it). */
 creativesRouter.post('/image', async (req, res, next) => {
   try {
     const { prompt, size, referenceImage, headline, primary_text, cta } = req.body || {};
     if (!prompt) return res.status(400).json({ error: 'Write a prompt first.' });
     const { provider, dataUrl } = await generateImage(prompt, { size, referenceImage });
     const { rows } = await q(
-      `INSERT INTO creatives (kind, prompt, headline, primary_text, cta, provider, image_data, user_id)
-       VALUES ('image',$1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      `INSERT INTO creatives (kind, prompt, headline, primary_text, cta, provider, image_data, status, review_expires_at, user_id)
+       VALUES ('image',$1,$2,$3,$4,$5,$6,'review', now() + interval '30 days', $7) RETURNING *`,
       [prompt, headline || null, primary_text || null, cta || null, provider, dataUrl, req.user.id]
     );
     res.json(rows[0]);
@@ -49,16 +50,17 @@ creativesRouter.post('/image', async (req, res, next) => {
   }
 });
 
-/** Kick off a Veo video job and store it as a pending draft creative. Poll
- *  POST /:id/video/poll to find out when it's ready. */
+/** Kick off a Veo video job and store it as an unsaved 'review' draft (auto-
+ *  deleted after 30 days unless the user Saves it). Poll POST /:id/video/poll
+ *  to find out when it's ready. */
 creativesRouter.post('/video', async (req, res, next) => {
   try {
     const { prompt, aspectRatio, referenceImage, headline, primary_text, cta } = req.body || {};
     if (!prompt) return res.status(400).json({ error: 'Write a prompt first.' });
     const { provider, operationName } = await startVideo(prompt, { aspectRatio, referenceImage });
     const { rows } = await q(
-      `INSERT INTO creatives (kind, prompt, headline, primary_text, cta, provider, video_status, video_operation_name, user_id)
-       VALUES ('video',$1,$2,$3,$4,$5,'pending',$6,$7) RETURNING *`,
+      `INSERT INTO creatives (kind, prompt, headline, primary_text, cta, provider, video_status, video_operation_name, status, review_expires_at, user_id)
+       VALUES ('video',$1,$2,$3,$4,$5,'pending',$6,'review', now() + interval '30 days', $7) RETURNING *`,
       [prompt, headline || null, primary_text || null, cta || null, provider, operationName, req.user.id]
     );
     res.json(rows[0]);
@@ -108,6 +110,22 @@ creativesRouter.post('/upload', async (req, res, next) => {
   }
 });
 
+/** Save an unsaved 'review' draft to the gallery for good: clears the 30-day
+ *  expiry and moves it into the normal 'draft' state (Approve is still separate). */
+creativesRouter.post('/:id/keep', async (req, res, next) => {
+  try {
+    const { rows } = await q(
+      `UPDATE creatives SET status = 'draft', review_expires_at = NULL
+       WHERE id = $1 AND user_id = $2 AND status = 'review' RETURNING *`,
+      [req.params.id, req.user.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'That draft is no longer waiting to be saved.' });
+    res.json(rows[0]);
+  } catch (e) {
+    next(e);
+  }
+});
+
 creativesRouter.patch('/:id', async (req, res, next) => {
   try {
     const {
@@ -151,3 +169,17 @@ creativesRouter.delete('/:id', async (req, res, next) => {
     next(e);
   }
 });
+
+/** Sweep unsaved 'review' drafts whose 30-day window has passed. Runs on a
+ *  timer from index.js; safe to call anytime. */
+export async function pruneExpiredReviewDrafts() {
+  try {
+    const { rowCount } = await q(
+      `DELETE FROM creatives
+       WHERE status = 'review' AND review_expires_at IS NOT NULL AND review_expires_at < now()`
+    );
+    if (rowCount) console.log(`[Creatives] Auto-deleted ${rowCount} expired unsaved draft(s).`);
+  } catch (e) {
+    console.error('Creative draft prune failed:', e.message);
+  }
+}

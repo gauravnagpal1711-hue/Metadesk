@@ -15,6 +15,11 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
   const [open, setOpen] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const [label, setLabel] = useState(creative.label || '');
+  const [headline, setHeadline] = useState(creative.headline || '');
+  const [primaryText, setPrimaryText] = useState(creative.primary_text || '');
+  const [ctaText, setCtaText] = useState(creative.cta || '');
+  const [copyProvider, setCopyProvider] = useState(false);
+  const [copyBusy, setCopyBusy] = useState(false);
   const [destType, setDestType] = useState(creative.destination_type || 'whatsapp');
   const [destValue, setDestValue] = useState(creative.destination_value || '');
   const [linkUrl, setLinkUrl] = useState(creative.link_url || '');
@@ -34,6 +39,7 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
     if (!open) return undefined;
     api.get('/meta/whatsapp-number').then((r) => setWaNumber(r.number || null)).catch(() => {});
     api.get('/meta/lead-forms').then((r) => setForms(Array.isArray(r) ? r : [])).catch(() => {});
+    api.get('/creatives/providers').then((p) => setCopyProvider(!!p.copy)).catch(() => {});
     loadPageInfo();
     const onKey = (e) => e.key === 'Escape' && setOpen(false);
     window.addEventListener('keydown', onKey);
@@ -120,6 +126,23 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
     }
   }
 
+  async function writeCopy() {
+    const brief = (label || creative.prompt || '').trim();
+    if (!brief) { setError('Add a creative name first so the copy has something to go on.'); return; }
+    setCopyBusy(true);
+    setError('');
+    try {
+      const c = await api.post('/creatives/copy', { brief });
+      if (c.headline) setHeadline(c.headline);
+      if (c.primary_text) setPrimaryText(c.primary_text);
+      if (c.cta) setCtaText(c.cta);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setCopyBusy(false);
+    }
+  }
+
   async function save() {
     setBusy(true);
     setError('');
@@ -133,6 +156,9 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
 
       const updated = await api.patch(`/creatives/${creative.id}`, {
         label: label.trim(),
+        headline: headline.trim(),
+        primary_text: primaryText.trim(),
+        cta: ctaText.trim(),
         destination_type: destType,
         destination_value,
         cta_type: ctaType,
@@ -154,6 +180,29 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
       <div className="field" style={{ margin: 0 }}>
         <label>Creative name</label>
         <input className="input" placeholder="Weekend gold offer" value={label} onChange={(e) => setLabel(e.target.value)} />
+      </div>
+
+      <div style={{ display: 'grid', gap: 10, padding: 10, border: '1px solid var(--line)', borderRadius: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="mono-label">Ad copy</span>
+          {copyProvider && (
+            <button className="btn ghost sm" style={{ marginLeft: 'auto' }} onClick={writeCopy} disabled={copyBusy}>
+              {copyBusy ? 'Writing…' : 'Write the ad copy for me'}
+            </button>
+          )}
+        </div>
+        <div className="field" style={{ margin: 0 }}>
+          <label>Headline</label>
+          <input className="input" maxLength={40} value={headline} onChange={(e) => setHeadline(e.target.value)} />
+        </div>
+        <div className="field" style={{ margin: 0 }}>
+          <label>Primary text</label>
+          <textarea className="textarea" style={{ minHeight: 70 }} value={primaryText} onChange={(e) => setPrimaryText(e.target.value)} />
+        </div>
+        <div className="field" style={{ margin: 0 }}>
+          <label>Button label</label>
+          <input className="input" placeholder="e.g. Book now" value={ctaText} onChange={(e) => setCtaText(e.target.value)} />
+        </div>
       </div>
 
       <div className="field" style={{ margin: 0 }}>

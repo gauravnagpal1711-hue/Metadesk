@@ -28,6 +28,12 @@ function friendlyProvider(provider) {
   return '✨ Made with AI';
 }
 
+/** Whole days left before an unsaved draft is auto-deleted (0 once it's due). */
+function daysLeft(ts) {
+  if (!ts) return null;
+  return Math.max(0, Math.ceil((new Date(ts).getTime() - Date.now()) / 86400000));
+}
+
 /** Builds a usable prompt with no API call — this runs entirely in your browser. */
 function buildPrompt({ brief, ratio, forVideo }) {
   if (forVideo) {
@@ -58,7 +64,6 @@ export default function Creative() {
   const [videoAspect, setVideoAspect] = useState(VIDEO_ASPECTS[0].v);
   const [attachment, setAttachment] = useState(null); // { dataUrl, mime, name }
   const [recording, setRecording] = useState(false);
-  const [copy, setCopy] = useState({ headline: '', primary_text: '', cta: '', image_prompt: '' });
   const [promptModal, setPromptModal] = useState(null); // null closed, else { text }
   const [gallery, setGallery] = useState([]);
   const [busy, setBusy] = useState('');
@@ -127,36 +132,43 @@ export default function Creative() {
     if (attachRef.current) attachRef.current.value = '';
   }
 
-  async function writeCopy() {
-    setBusy('copy');
-    setError('');
-    try {
-      setCopy(await api.post('/creatives/copy', { brief }));
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy('');
-    }
-  }
-
   function openPromptModal() {
     const forVideo = outputKind === 'video';
     const ratio = forVideo
       ? VIDEO_ASPECTS.find((a) => a.v === videoAspect)?.ratio || 'horizontal 16:9'
       : SIZES.find((s) => s.v === size)?.ratio || 'square 1:1';
-    setPromptModal({ text: copy.image_prompt || buildPrompt({ brief, ratio, forVideo }) });
+    setPromptModal({ text: buildPrompt({ brief, ratio, forVideo }), phase: 'edit', reviewId: null });
+  }
+
+  /** Reopen the review window for an unsaved draft sitting in the gallery. */
+  function reopenReview(c) {
+    setOutputKind(c.kind === 'video' ? 'video' : 'image');
+    setPromptModal({ text: c.prompt || '', phase: 'review', reviewId: c.id });
+  }
+
+  /** "Edit further" replaces the current attempt: drop the old review draft
+   *  before the next generate makes a fresh one. */
+  async function dropPriorReview() {
+    const id = promptModal?.reviewId;
+    if (!id) return;
+    try {
+      await api.del(`/creatives/${id}`);
+    } catch {
+      /* already gone — fine */
+    }
+    setGallery((g) => g.filter((c) => c.id !== id));
   }
 
   async function generate(promptText) {
     setBusy('image');
     setError('');
     try {
+      await dropPriorReview();
       const created = await api.post('/creatives/image', {
-        prompt: promptText, size, referenceImage: attachment?.dataUrl,
-        headline: copy.headline, primary_text: copy.primary_text, cta: copy.cta
+        prompt: promptText, size, referenceImage: attachment?.dataUrl
       });
       setGallery((g) => [created, ...g]);
-      setPromptModal(null);
+      setPromptModal({ text: promptText, phase: 'review', reviewId: created.id });
     } catch (e) {
       setError(e.message);
     } finally {
@@ -188,13 +200,13 @@ export default function Creative() {
     setBusy('video');
     setError('');
     try {
+      await dropPriorReview();
       const created = await api.post('/creatives/video', {
-        prompt: promptText, aspectRatio: videoAspect, referenceImage: attachment?.dataUrl,
-        headline: copy.headline, primary_text: copy.primary_text, cta: copy.cta
+        prompt: promptText, aspectRatio: videoAspect, referenceImage: attachment?.dataUrl
       });
       setGallery((g) => [created, ...g]);
       pollVideoStatus(created.id);
-      setPromptModal(null);
+      setPromptModal({ text: promptText, phase: 'review', reviewId: created.id });
     } catch (e) {
       setError(e.message);
     } finally {
@@ -218,12 +230,7 @@ export default function Creative() {
         r.onerror = () => reject(new Error('Could not read that file.'));
         r.readAsDataURL(file);
       });
-      const created = await api.post('/creatives/upload', {
-        imageData: dataUrl,
-        headline: copy.headline,
-        primary_text: copy.primary_text,
-        cta: copy.cta
-      });
+      const created = await api.post('/creatives/upload', { imageData: dataUrl });
       setGallery((g) => [created, ...g]);
       if (fileRef.current) fileRef.current.value = '';
     } catch (e) {
@@ -242,13 +249,33 @@ export default function Creative() {
     setGallery((g) => g.map((c) => (c.id === updated.id ? updated : c)));
   }
 
+  /** Confirm an unsaved 'review' draft — it stops expiring and joins the gallery
+   *  for good (still needs Approve before it can go on a campaign). */
+  async function keepDraft(id) {
+    setBusy('keep');
+    setError('');
+    try {
+      const updated = await api.post(`/creatives/${id}/keep`);
+      setGallery((g) => g.map((c) => (c.id === id ? updated : c)));
+      setPromptModal((p) => (p && p.reviewId === id ? null : p));
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy('');
+    }
+  }
+
   async function remove(id) {
     await api.del(`/creatives/${id}`);
     setGallery((g) => g.filter((c) => c.id !== id));
+    setPromptModal((p) => (p && p.reviewId === id ? null : p));
   }
 
   const someReady = gallery.some(isCampaignReady);
   const generating = busy === 'image' || busy === 'video';
+  const reviewCreative = promptModal?.reviewId
+    ? gallery.find((c) => c.id === promptModal.reviewId)
+    : null;
 
   return (
     <>
@@ -275,183 +302,211 @@ export default function Creative() {
         </button>
       </div>
 
-      <div className="grid2">
-        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <h2>What are you advertising?</h2>
+      <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <h2>What are you advertising?</h2>
 
-          <div className="field" style={{ marginBottom: 0 }}>
-            <div style={{ position: 'relative' }}>
-              <textarea
-                id="brief"
-                className="textarea"
-                style={{ minHeight: 150, paddingRight: 76 }}
-                placeholder="Weekend gold jewellery exhibition at our Andheri showroom, 20% off making charges."
-                value={brief}
-                onChange={(e) => setBrief(e.target.value)}
-              />
-              <div style={{ position: 'absolute', right: 8, bottom: 8, display: 'flex', gap: 4 }}>
-                <button
-                  type="button"
-                  className={`wa-icon-btn ${recording ? 'recording' : ''}`}
-                  onClick={toggleVoice}
-                  disabled={!SpeechRecognitionCtor}
-                  title={SpeechRecognitionCtor ? (recording ? 'Stop listening' : 'Speak your brief') : 'Voice input is not supported in this browser'}
-                  aria-label="Speak your brief"
-                >
-                  🎤
-                </button>
-                <button
-                  type="button"
-                  className="wa-icon-btn"
-                  onClick={() => attachRef.current?.click()}
-                  title="Attach a reference photo"
-                  aria-label="Attach a reference photo"
-                >
-                  📎
-                </button>
-              </div>
-              <input
-                ref={attachRef}
-                type="file"
-                accept="image/*"
-                style={{ display: 'none' }}
-                onChange={(e) => pickAttachment(e.target.files?.[0])}
-              />
-            </div>
-          </div>
-
-          {recording && <div style={{ fontSize: 12.5, color: 'var(--accent)' }}>🎙️ Listening… speak now, tap the mic again to stop.</div>}
-
-          {attachment && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <img src={attachment.dataUrl} alt="" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 6 }} />
-              <span style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{attachment.name}</span>
-              <button className="btn ghost sm" onClick={() => setAttachment(null)}>Remove</button>
-            </div>
-          )}
-
-          <div className="provider-row">
-            <span className="dot" style={{ background: providers[outputKind] ? 'var(--good)' : 'var(--muted-2)' }} />
-            <span className="name" style={{ textTransform: 'none', fontFamily: 'inherit', fontSize: 13, letterSpacing: 'normal' }}>
-              {providers[outputKind]
-                ? (outputKind === 'video' ? 'Ready to generate video' : 'Ready to generate images')
-                : 'Not set up yet'}
-            </span>
-          </div>
-
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {providers.copy && (
-              <button className="btn ghost" onClick={writeCopy} disabled={!brief || busy === 'copy'}>
-                {busy === 'copy' ? 'Writing…' : 'Write the ad copy for me'}
+        <div className="field" style={{ marginBottom: 0 }}>
+          <div style={{ position: 'relative' }}>
+            <textarea
+              id="brief"
+              className="textarea"
+              style={{ minHeight: 150, paddingRight: 76 }}
+              placeholder="Weekend gold jewellery exhibition at our Andheri showroom, 20% off making charges."
+              value={brief}
+              onChange={(e) => setBrief(e.target.value)}
+            />
+            <div style={{ position: 'absolute', right: 8, bottom: 8, display: 'flex', gap: 4 }}>
+              <button
+                type="button"
+                className={`wa-icon-btn ${recording ? 'recording' : ''}`}
+                onClick={toggleVoice}
+                disabled={!SpeechRecognitionCtor}
+                title={SpeechRecognitionCtor ? (recording ? 'Stop listening' : 'Speak your brief') : 'Voice input is not supported in this browser'}
+                aria-label="Speak your brief"
+              >
+                🎤
               </button>
-            )}
-            <button
-              className="btn primary"
-              style={{ marginLeft: 'auto' }}
-              onClick={openPromptModal}
-              disabled={!brief || !providers[outputKind]}
-            >
-              {outputKind === 'video' ? 'Generate video' : 'Generate image'}
-            </button>
-          </div>
-        </div>
-
-        <div>
-          <div className="card" style={{ marginBottom: 16 }}>
-            <h2>Bring the artwork back</h2>
-            <ol className="steps" style={{ marginBottom: 14 }}>
-              <li>Write a prompt (or copy the one we build for you).</li>
-              <li>Make the image with any AI tool you like.</li>
-              <li>Upload it here — it joins your gallery with this copy attached.</li>
-            </ol>
+              <button
+                type="button"
+                className="wa-icon-btn"
+                onClick={() => attachRef.current?.click()}
+                title="Attach a reference photo"
+                aria-label="Attach a reference photo"
+              >
+                📎
+              </button>
+            </div>
             <input
-              ref={fileRef}
+              ref={attachRef}
               type="file"
               accept="image/*"
-              onChange={(e) => upload(e.target.files?.[0])}
-              disabled={busy === 'upload'}
+              style={{ display: 'none' }}
+              onChange={(e) => pickAttachment(e.target.files?.[0])}
             />
-            {busy === 'upload' && <div style={{ color: 'var(--muted)', marginTop: 8 }}>Saving…</div>}
-          </div>
-
-          <div className="card">
-            <h2>Ad copy</h2>
-            <div className="field">
-              <label htmlFor="hl">Headline</label>
-              <input id="hl" className="input" maxLength={40} value={copy.headline} onChange={(e) => setCopy({ ...copy, headline: e.target.value })} />
-            </div>
-            <div className="field">
-              <label htmlFor="pt">Primary text</label>
-              <textarea id="pt" className="textarea" style={{ minHeight: 70 }} value={copy.primary_text} onChange={(e) => setCopy({ ...copy, primary_text: e.target.value })} />
-            </div>
-            <div className="field">
-              <label htmlFor="cta">Button</label>
-              <input id="cta" className="input" value={copy.cta} onChange={(e) => setCopy({ ...copy, cta: e.target.value })} />
-            </div>
-            <button
-              className="btn"
-              onClick={() => toClipboard(`${copy.headline}\n\n${copy.primary_text}\n\n${copy.cta}`, 'copy')}
-              disabled={!copy.headline && !copy.primary_text}
-            >
-              {copied === 'copy' ? 'Copied ✓' : 'Copy for Ads Manager'}
-            </button>
           </div>
         </div>
+
+        {recording && <div style={{ fontSize: 12.5, color: 'var(--accent)' }}>🎙️ Listening… speak now, tap the mic again to stop.</div>}
+
+        {attachment && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <img src={attachment.dataUrl} alt="" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 6 }} />
+            <span style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{attachment.name}</span>
+            <button className="btn ghost sm" onClick={() => setAttachment(null)}>Remove</button>
+          </div>
+        )}
+
+        <div className="provider-row">
+          <span className="dot" style={{ background: providers[outputKind] ? 'var(--good)' : 'var(--muted-2)' }} />
+          <span className="name" style={{ textTransform: 'none', fontFamily: 'inherit', fontSize: 13, letterSpacing: 'normal' }}>
+            {providers[outputKind]
+              ? (outputKind === 'video' ? 'Ready to generate video' : 'Ready to generate images')
+              : 'Not set up yet'}
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            className="btn primary"
+            style={{ marginLeft: 'auto' }}
+            onClick={openPromptModal}
+            disabled={!brief || !providers[outputKind]}
+          >
+            {outputKind === 'video' ? 'Generate video' : 'Generate image'}
+          </button>
+        </div>
+
+        <p style={{ margin: 0, fontSize: 12.5, color: 'var(--muted)' }}>
+          Headline, primary text and button are added later, per campaign, from the
+          creative's <strong>Set up for campaign</strong> button in the gallery below.
+        </p>
       </div>
 
       {promptModal && (
         <>
-          <div className="scrim" onClick={() => !generating && setPromptModal(null)} />
+          <div className="scrim" onClick={() => !generating && busy !== 'keep' && setPromptModal(null)} />
           <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
             <div className="card" style={{ width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
-                <h2 style={{ margin: 0 }}>{outputKind === 'video' ? 'Review your video' : 'Review your image'}</h2>
-                <button className="close" style={{ marginLeft: 'auto' }} onClick={() => setPromptModal(null)} disabled={generating} aria-label="Close">×</button>
-              </div>
-
-              <div className="field" style={{ marginBottom: 10 }}>
-                <label htmlFor="final-prompt">Prompt — edit anything before generating</label>
-                <textarea
-                  id="final-prompt"
-                  className="textarea"
-                  style={{ minHeight: 150 }}
-                  value={promptModal.text}
-                  onChange={(e) => setPromptModal((p) => ({ ...p, text: e.target.value }))}
-                />
-              </div>
-
-              <div className="field" style={{ marginBottom: 0 }}>
-                {outputKind === 'video' ? (
-                  <>
-                    <label htmlFor="modal-aspect">Aspect ratio</label>
-                    <select id="modal-aspect" className="select" value={videoAspect} onChange={(e) => setVideoAspect(e.target.value)}>
-                      {VIDEO_ASPECTS.map((a) => <option key={a.v} value={a.v}>{a.l}</option>)}
-                    </select>
-                  </>
-                ) : (
-                  <>
-                    <label htmlFor="modal-aspect">Placement</label>
-                    <select id="modal-aspect" className="select" value={size} onChange={(e) => setSize(e.target.value)}>
-                      {SIZES.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
-                    </select>
-                  </>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
-                <button className="btn ghost" onClick={() => toClipboard(promptModal.text, 'prompt')}>
-                  {copied === 'prompt' ? 'Copied ✓' : 'Copy prompt'}
-                </button>
-                <button className="btn primary" style={{ marginLeft: 'auto' }} onClick={submitFromModal} disabled={generating}>
-                  {generating
-                    ? (outputKind === 'video' ? 'Starting…' : 'Generating…')
-                    : (outputKind === 'video' ? 'Generate video' : 'Generate image')}
+                <h2 style={{ margin: 0 }}>
+                  {promptModal.phase === 'review'
+                    ? (outputKind === 'video' ? 'Your video' : 'Your image')
+                    : (outputKind === 'video' ? 'Set up your video' : 'Set up your image')}
+                </h2>
+                <button
+                  className="close"
+                  style={{ marginLeft: 'auto' }}
+                  onClick={() => setPromptModal(null)}
+                  disabled={generating || busy === 'keep'}
+                  aria-label="Close"
+                >
+                  ×
                 </button>
               </div>
-              {outputKind === 'video' && (
-                <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
-                  Video takes a few minutes to make — it'll keep generating in the background and show up in the gallery below when ready.
-                </div>
+
+              {promptModal.phase === 'review' ? (
+                <>
+                  {reviewCreative?.image_data && (
+                    <img src={reviewCreative.image_data} alt="" style={{ width: '100%', borderRadius: 8, display: 'block' }} />
+                  )}
+                  {reviewCreative?.kind === 'video' && reviewCreative.video_status === 'pending' && (
+                    <div className="notice">
+                      Your video is still generating — this takes a few minutes. It's held as an
+                      unsaved draft, so you can close this and come back to Save or Discard it from
+                      the gallery once it's ready.
+                    </div>
+                  )}
+                  {reviewCreative?.kind === 'video' && reviewCreative.video_status === 'failed' && (
+                    <div className="notice bad">{reviewCreative.video_error || 'Video generation failed.'}</div>
+                  )}
+                  {reviewCreative?.kind === 'video' && reviewCreative.video_status === 'ready' && reviewCreative.video_url && (
+                    <video src={reviewCreative.video_url} controls style={{ width: '100%', borderRadius: 8, display: 'block' }} />
+                  )}
+
+                  <p style={{ margin: '12px 0 0', fontSize: 12.5, color: 'var(--muted)' }}>
+                    Not saved yet. If you don't Save it, it stays as an unsaved draft in the gallery
+                    for 30 days and is then deleted automatically.
+                  </p>
+
+                  <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
+                    <button
+                      className="btn ghost"
+                      onClick={() => setPromptModal((p) => ({ ...p, phase: 'edit' }))}
+                      disabled={generating || busy === 'keep'}
+                    >
+                      Edit further
+                    </button>
+                    <button
+                      className="btn ghost danger"
+                      onClick={() => remove(promptModal.reviewId)}
+                      disabled={generating || busy === 'keep'}
+                    >
+                      Discard
+                    </button>
+                    <button
+                      className="btn primary"
+                      style={{ marginLeft: 'auto' }}
+                      onClick={() => keepDraft(promptModal.reviewId)}
+                      disabled={busy === 'keep'}
+                    >
+                      {busy === 'keep' ? 'Saving…' : 'Save to gallery'}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="field" style={{ marginBottom: 10 }}>
+                    <label htmlFor="final-prompt">Prompt — edit anything before generating</label>
+                    <textarea
+                      id="final-prompt"
+                      className="textarea"
+                      style={{ minHeight: 150 }}
+                      value={promptModal.text}
+                      onChange={(e) => setPromptModal((p) => ({ ...p, text: e.target.value }))}
+                    />
+                  </div>
+
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    {outputKind === 'video' ? (
+                      <>
+                        <label htmlFor="modal-aspect">Aspect ratio</label>
+                        <select id="modal-aspect" className="select" value={videoAspect} onChange={(e) => setVideoAspect(e.target.value)}>
+                          {VIDEO_ASPECTS.map((a) => <option key={a.v} value={a.v}>{a.l}</option>)}
+                        </select>
+                      </>
+                    ) : (
+                      <>
+                        <label htmlFor="modal-aspect">Placement</label>
+                        <select id="modal-aspect" className="select" value={size} onChange={(e) => setSize(e.target.value)}>
+                          {SIZES.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
+                        </select>
+                      </>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
+                    <button className="btn ghost" onClick={() => toClipboard(promptModal.text, 'prompt')}>
+                      {copied === 'prompt' ? 'Copied ✓' : 'Copy prompt'}
+                    </button>
+                    <button className="btn primary" style={{ marginLeft: 'auto' }} onClick={submitFromModal} disabled={generating}>
+                      {generating
+                        ? (outputKind === 'video' ? 'Starting…' : 'Generating…')
+                        : promptModal.reviewId
+                          ? (outputKind === 'video' ? 'Regenerate video' : 'Regenerate image')
+                          : (outputKind === 'video' ? 'Generate video' : 'Generate image')}
+                    </button>
+                  </div>
+                  {promptModal.reviewId && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
+                      Regenerating replaces the current attempt.
+                    </div>
+                  )}
+                  {outputKind === 'video' && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
+                      Video takes a few minutes to make — it keeps generating in the background.
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -461,6 +516,21 @@ export default function Creative() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '28px 0 12px' }}>
         <h2 style={{ margin: 0, fontSize: 16 }}>Gallery</h2>
         <span className="mono-label">{gallery.length} creatives</span>
+        <button
+          className="btn sm"
+          style={{ marginLeft: 'auto' }}
+          onClick={() => fileRef.current?.click()}
+          disabled={busy === 'upload'}
+        >
+          {busy === 'upload' ? 'Uploading…' : '📤 Upload content'}
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          style={{ display: 'none' }}
+          onChange={(e) => upload(e.target.files?.[0])}
+        />
       </div>
 
       {gallery.length === 0 ? (
@@ -486,17 +556,31 @@ export default function Creative() {
                 <div className="hl">{c.label || c.headline || 'Untitled'}</div>
                 <div className="pt">{c.primary_text || c.prompt}</div>
                 <div style={{ marginTop: 8, display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                  <span className={`tag ${c.status === 'approved' ? 'good' : 'off'}`}>{c.status}</span>
+                  {c.status === 'review' ? (
+                    <span className="tag warn">Unsaved · {daysLeft(c.review_expires_at) ?? 30}d left</span>
+                  ) : (
+                    <span className={`tag ${c.status === 'approved' ? 'good' : 'off'}`}>{c.status}</span>
+                  )}
                   {friendlyProvider(c.provider) && <span className="tag off">{friendlyProvider(c.provider)}</span>}
                   {isCampaignReady(c) && <span className="tag good">✓ campaign-ready</span>}
                 </div>
-                <CreativeCampaignFields creative={c} onSaved={patchCreative} />
+                {c.status !== 'review' && <CreativeCampaignFields creative={c} onSaved={patchCreative} />}
               </div>
               <div className="acts">
                 {c.image_data && <a className="btn sm" href={c.image_data} download={`creative-${c.id}.png`}>Download</a>}
                 {c.video_url && <a className="btn sm" href={c.video_url} download={`creative-${c.id}.mp4`}>Download</a>}
-                {c.status !== 'approved' && <button className="btn sm" onClick={() => approve(c.id)}>Approve</button>}
-                <button className="btn sm ghost danger" onClick={() => remove(c.id)}>Delete</button>
+                {c.status === 'review' ? (
+                  <>
+                    <button className="btn sm" onClick={() => keepDraft(c.id)} disabled={busy === 'keep'}>Save to gallery</button>
+                    <button className="btn sm ghost" onClick={() => reopenReview(c)}>Edit</button>
+                    <button className="btn sm ghost danger" onClick={() => remove(c.id)}>Discard</button>
+                  </>
+                ) : (
+                  <>
+                    {c.status !== 'approved' && <button className="btn sm" onClick={() => approve(c.id)}>Approve</button>}
+                    <button className="btn sm ghost danger" onClick={() => remove(c.id)}>Delete</button>
+                  </>
+                )}
               </div>
             </div>
           ))}

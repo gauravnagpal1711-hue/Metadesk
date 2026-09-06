@@ -7,7 +7,7 @@ import cors from 'cors';
 
 import { initDb, q } from './db.js';
 import { authRouter, requireAuth } from './auth.js';
-import { creativesRouter } from './routes/creatives.js';
+import { creativesRouter, pruneExpiredReviewDrafts } from './routes/creatives.js';
 import { campaignsRouter } from './routes/campaigns.js';
 import { leadsRouter } from './routes/leads.js';
 import { campaignBriefsRouter } from './routes/campaignBriefs.js';
@@ -163,6 +163,10 @@ if (process.env.ADS_DESK_NO_BOOT !== '1') initDb()
     // no-ops for those without, so a connection made later starts syncing on its own.
     syncEverything();
     setInterval(syncEverything, SYNC_MINUTES * 60 * 1000);
+
+    // Auto-delete unsaved 'review' creative drafts once their 30-day window lapses.
+    pruneExpiredReviewDrafts();
+    setInterval(pruneExpiredReviewDrafts, 6 * 60 * 60 * 1000);
 
     if (process.env.WA_WEB_AUTOSTART !== 'false') {
       pairedWebUserIds()
