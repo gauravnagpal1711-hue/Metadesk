@@ -52,8 +52,11 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
     setBriefs((list) => [b, ...list.filter((x) => x.id !== b.id)]);
   }
 
+  const [confirmDelete, setConfirmDelete] = useState(null); // brief id awaiting a second click
+
   async function deleteBrief(id) {
-    if (!window.confirm('Delete this campaign brief?')) return;
+    if (confirmDelete !== id) { setConfirmDelete(id); return; }
+    setConfirmDelete(null);
     try {
       await api.del(`/campaign-briefs/${id}`);
       setBriefs((b) => b.filter((x) => x.id !== id));
@@ -66,9 +69,9 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
     } catch (e) { setError(e.message); }
   }
 
-  // "Set campaign" — build the brief on Meta now, all PAUSED.
+  // "Set campaign" — build the brief on Meta now, all PAUSED. No confirm needed:
+  // nothing spends until "Start campaign", and a failure is fully rolled back.
   async function setCampaign(brief) {
-    if (!window.confirm(`Create "${brief.name}" on Meta now? It is created PAUSED — nothing spends until you press "Start campaign".`)) return;
     setBriefBusy(brief.id);
     setError('');
     setNotice('');
@@ -241,7 +244,9 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
                     <td className="num" style={{ textAlign: 'right' }}>—</td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       {briefAction(b)}{' '}
-                      <button className="btn sm ghost danger" onClick={() => deleteBrief(b.id)}>Delete</button>
+                      <button className="btn sm ghost danger" onClick={() => deleteBrief(b.id)}>
+                        {confirmDelete === b.id ? 'Confirm delete?' : 'Delete'}
+                      </button>
                     </td>
                   </tr>
                 );
