@@ -342,50 +342,68 @@ export async function uploadAdImage(conn, dataUrl) {
   return first.hash;
 }
 
-/** Click-to-WhatsApp ad creative from the page + uploaded image. */
-export async function createCreative(conn, { name, pageId, message, imageHash, waNumber }) {
+/**
+ * Upload a data-URL video to the ad account (multipart). Returns the video id.
+ * Meta processes the video asynchronously — the id is usable straight away for a
+ * PAUSED ad, but the thumbnail (getVideoThumbnail) takes a few more seconds.
+ */
+export async function uploadAdVideo(conn, dataUrl) {
+  const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl || '');
+  if (!m) throw new Error('The creative has no usable video to upload.');
+  const form = new FormData();
+  form.append('access_token', conn.accessToken);
+  form.append('name', 'Ads Desk creative');
+  form.append('source', new Blob([Buffer.from(m[2], 'base64')], { type: m[1] || 'video/mp4' }), 'creative.mp4');
+  const res = await fetch(`${BASE}/${accountId(conn)}/advideos`, { method: 'POST', body: form });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok || !json.id) throw new Error(json?.error?.message || 'Meta rejected the video upload.');
+  return json.id;
+}
+
+/**
+ * Poll a freshly uploaded video for a usable thumbnail URL. Meta generates these
+ * within a few seconds of the upload; we wait up to ~75s. A video ad creative
+ * needs a thumbnail (image_url), so a null here is a real failure.
+ */
+export async function getVideoThumbnail(conn, videoId) {
+  for (let i = 0; i < 15; i++) {
+    const data = await graph(videoId, { conn, params: { fields: 'thumbnails{uri,is_preferred}' } }).catch(() => ({}));
+    const thumbs = data?.thumbnails?.data || [];
+    const pick = thumbs.find((t) => t.is_preferred) || thumbs[0];
+    if (pick?.uri) return pick.uri;
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+  return null;
+}
+
+/** Click-to-WhatsApp ad creative from the page + an uploaded image or video. */
+export async function createCreative(conn, { name, pageId, message, imageHash, videoId, thumbnailUrl, waNumber }) {
+  const link = `https://api.whatsapp.com/send?phone=${waNumber}`;
+  const cta = { type: 'WHATSAPP_MESSAGE', value: { app_destination: 'WHATSAPP' } };
+  const spec = videoId
+    ? { video_data: { video_id: String(videoId), message: message || '', link, call_to_action: cta, image_url: thumbnailUrl } }
+    : { link_data: { message: message || '', image_hash: imageHash, link, call_to_action: cta } };
   return graph(`${accountId(conn)}/adcreatives`, {
     conn,
     method: 'POST',
-    body: {
-      name,
-      object_story_spec: {
-        page_id: String(pageId),
-        link_data: {
-          message: message || '',
-          image_hash: imageHash,
-          link: `https://api.whatsapp.com/send?phone=${waNumber}`,
-          call_to_action: { type: 'WHATSAPP_MESSAGE', value: { app_destination: 'WHATSAPP' } }
-        }
-      }
-    }
+    body: { name, object_story_spec: { page_id: String(pageId), ...spec } }
   });
 }
 
 /**
- * Instant-Form ad creative: tapping the CTA opens the lead form on Facebook.
- * `link` is Meta's documented placeholder for lead ads — the form id in the
- * call_to_action is what actually drives it.
+ * Instant-Form ad creative (image or video): tapping the CTA opens the lead form
+ * on Facebook. `link` is Meta's documented placeholder for lead ads — the form id
+ * in the call_to_action is what actually drives it.
  */
-export async function createLeadFormCreative(conn, { name, pageId, message, imageHash, leadFormId, ctaType }) {
+export async function createLeadFormCreative(conn, { name, pageId, message, imageHash, videoId, thumbnailUrl, leadFormId, ctaType }) {
+  const cta = { type: ctaType || 'SIGN_UP', value: { lead_gen_form_id: String(leadFormId) } };
+  const spec = videoId
+    ? { video_data: { video_id: String(videoId), message: message || '', call_to_action: cta, image_url: thumbnailUrl } }
+    : { link_data: { message: message || '', image_hash: imageHash, link: 'https://fb.me/', call_to_action: cta } };
   return graph(`${accountId(conn)}/adcreatives`, {
     conn,
     method: 'POST',
-    body: {
-      name,
-      object_story_spec: {
-        page_id: String(pageId),
-        link_data: {
-          message: message || '',
-          image_hash: imageHash,
-          link: 'https://fb.me/',
-          call_to_action: {
-            type: ctaType || 'SIGN_UP',
-            value: { lead_gen_form_id: String(leadFormId) }
-          }
-        }
-      }
-    }
+    body: { name, object_story_spec: { page_id: String(pageId), ...spec } }
   });
 }
 

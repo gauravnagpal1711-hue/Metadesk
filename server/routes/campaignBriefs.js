@@ -2,7 +2,8 @@ import express from 'express';
 import { q } from '../db.js';
 import {
   loadConnection, connConfigured, buildTargeting,
-  createCampaign, createAdSet, uploadAdImage, createCreative, createLeadFormCreative, createAd, deleteObject
+  createCampaign, createAdSet, uploadAdImage, uploadAdVideo, getVideoThumbnail,
+  createCreative, createLeadFormCreative, createAd, deleteObject
 } from '../services/meta.js';
 
 export const campaignBriefsRouter = express.Router();
@@ -15,7 +16,7 @@ export const campaignBriefsRouter = express.Router();
  */
 
 const CREATIVE_FIELDS =
-  'id, kind, headline, primary_text, cta, label, cta_type, destination_type, destination_value, link_url, image_data, status, campaign_defaults';
+  'id, kind, headline, primary_text, cta, label, cta_type, destination_type, destination_value, link_url, image_data, video_url, video_status, status, campaign_defaults';
 
 // Once the user has pressed "Set campaign" (queued), Claude has asked a question
 // (info_needed) or built it on Meta (created/live), the app stops recomputing
@@ -273,7 +274,15 @@ campaignBriefsRouter.post('/:id/launch', async (req, res, next) => {
     const targeting = buildTargeting(audience);
     const waNumber = String(creative.destination_value).replace(/\D/g, ''); // whatsapp only
 
-    let campaignId, adsetId, imageHash, creativeId, adId;
+    const isVideo = creative.kind === 'video' || (!creative.image_data && !!creative.video_url);
+    if (isVideo && !creative.video_url) {
+      return res.status(400).json({ error: 'This video creative isn\'t ready yet — wait for it to finish generating, then retry.' });
+    }
+    if (!isVideo && !creative.image_data) {
+      return res.status(400).json({ error: 'The creative has no image. Generate or upload one on the creative, then retry.' });
+    }
+
+    let campaignId, adsetId, imageHash, videoId, thumbnailUrl, creativeId, adId;
     let step = 'campaign';
     try {
       // Lead-form ad sets only validate against the OUTCOME_LEADS objective, so
@@ -293,26 +302,33 @@ campaignBriefsRouter.post('/:id/launch', async (req, res, next) => {
         endAt: brief.end_at,
         destination: dest
       }));
-      step = 'image upload';
-      imageHash = await uploadAdImage(conn, creative.image_data);
+      if (isVideo) {
+        step = 'video upload';
+        videoId = await uploadAdVideo(conn, creative.video_url);
+        step = 'video thumbnail';
+        thumbnailUrl = await getVideoThumbnail(conn, videoId);
+        if (!thumbnailUrl) throw new Error('Meta is still processing the video thumbnail — wait a minute and retry.');
+      } else {
+        step = 'image upload';
+        imageHash = await uploadAdImage(conn, creative.image_data);
+      }
       step = 'creative';
+      const common = {
+        name: `${brief.name} — creative`,
+        pageId: conn.pageId,
+        message: creative.primary_text || creative.headline || '',
+        imageHash,
+        videoId,
+        thumbnailUrl
+      };
       if (dest === 'lead_form') {
         ({ id: creativeId } = await createLeadFormCreative(conn, {
-          name: `${brief.name} — creative`,
-          pageId: conn.pageId,
-          message: creative.primary_text || creative.headline || '',
-          imageHash,
+          ...common,
           leadFormId: String(creative.destination_value).trim(),
           ctaType: creative.cta_type
         }));
       } else {
-        ({ id: creativeId } = await createCreative(conn, {
-          name: `${brief.name} — creative`,
-          pageId: conn.pageId,
-          message: creative.primary_text || creative.headline || '',
-          imageHash,
-          waNumber
-        }));
+        ({ id: creativeId } = await createCreative(conn, { ...common, waNumber }));
       }
       step = 'ad';
       ({ id: adId } = await createAd(conn, { name: `${brief.name} — ad`, adsetId, creativeId }));
