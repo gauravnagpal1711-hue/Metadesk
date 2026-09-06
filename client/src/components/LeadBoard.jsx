@@ -2,13 +2,27 @@ import { useState } from 'react';
 import { api, when } from '../api.js';
 import EditableDateChip from './EditableDateChip.jsx';
 
-const DEFAULT_SORT = { field: 'created', dir: 'desc' };
 const SORT_FIELD_KEYS = {
   created: 'created_at',
   updated: 'updated_at',
   followup: 'followup_date',
   appointment: 'appointment_date'
 };
+
+/**
+ * Each stage starts on the sort that makes sense for it, until the user picks
+ * another from the dropdown:
+ *   - appointment stage → by appointment date, soonest first
+ *   - follow-up stage   → by follow-up date, soonest first
+ *   - a "Contacted"-type stage → by last update, newest first
+ *   - everything else (New Lead, Interested, …) → by created, newest first
+ */
+function defaultSortFor(stage) {
+  if (stage.requires_appointment_date) return { field: 'appointment', dir: 'asc' };
+  if (stage.requires_followup_date) return { field: 'followup', dir: 'asc' };
+  if (/contact/i.test(stage.name || '')) return { field: 'updated', dir: 'desc' };
+  return { field: 'created', dir: 'desc' };
+}
 
 /**
  * Sort choices depend on the stage. Every stage sorts by Created / Updated; the
@@ -34,21 +48,21 @@ export default function LeadBoard({ stages, leads, unreadFirst = false, onOpenLe
   const [copiedId, setCopiedId] = useState(null);
   const [pendingDrop, setPendingDrop] = useState(null);
 
-  function getSort(stageId) {
-    return sortState[stageId] || DEFAULT_SORT;
+  function getSort(stage) {
+    return sortState[stage.id] || defaultSortFor(stage);
   }
   /** getSort clamped to a field this stage actually offers. */
   function resolvedSort(stage) {
-    const cur = getSort(stage.id);
+    const cur = getSort(stage);
     return sortOptionsFor(stage).some((o) => o.value === cur.field) ? cur : { ...cur, field: 'created' };
   }
-  function setSortField(stageId, field) {
-    setSortState((s) => ({ ...s, [stageId]: { ...getSort(stageId), field } }));
+  function setSortField(stage, field) {
+    setSortState((s) => ({ ...s, [stage.id]: { ...getSort(stage), field } }));
   }
-  function toggleSortDir(stageId) {
+  function toggleSortDir(stage) {
     setSortState((s) => {
-      const cur = getSort(stageId);
-      return { ...s, [stageId]: { ...cur, dir: cur.dir === 'asc' ? 'desc' : 'asc' } };
+      const cur = getSort(stage);
+      return { ...s, [stage.id]: { ...cur, dir: cur.dir === 'asc' ? 'desc' : 'asc' } };
     });
   }
   function sortLeads(list, stage) {
@@ -160,14 +174,14 @@ export default function LeadBoard({ stages, leads, unreadFirst = false, onOpenLe
               </div>
 
               <div className="col-sort">
-                <select className="select" value={sort.field} onChange={(e) => setSortField(stage.id, e.target.value)}>
+                <select className="select" value={sort.field} onChange={(e) => setSortField(stage, e.target.value)}>
                   {sortOptionsFor(stage).map((o) => (
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </select>
                 <button
                   className="dir-btn"
-                  onClick={() => toggleSortDir(stage.id)}
+                  onClick={() => toggleSortDir(stage)}
                   title={sort.dir === 'asc' ? 'Ascending — click for descending' : 'Descending — click for ascending'}
                   aria-label="Toggle sort direction"
                 >
