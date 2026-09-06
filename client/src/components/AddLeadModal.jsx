@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { api } from '../api.js';
+import { useValidation } from '../useValidation.js';
 
 const COLUMN_ALIASES = {
   name: ['name', 'full name', 'full_name', 'lead name', 'contact name', 'customer name'],
@@ -51,6 +52,7 @@ export default function AddLeadModal({ stages, campaigns, onClose, onCreated, on
   const [remark, setRemark] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const v = useValidation();
 
   // bulk-upload state
   const [rows, setRows] = useState(null); // parsed sheet rows
@@ -61,10 +63,10 @@ export default function AddLeadModal({ stages, campaigns, onClose, onCreated, on
   const fileRef = useRef(null);
 
   async function submit() {
-    if (!name.trim() || !phone.trim()) {
-      setError('Name and number are required.');
-      return;
-    }
+    if (!v.check({
+      name: { value: name, label: 'Name' },
+      phone: { value: phone, label: 'Number' }
+    })) return;
     setBusy(true);
     setError('');
     try {
@@ -174,29 +176,30 @@ export default function AddLeadModal({ stages, campaigns, onClose, onCreated, on
           </div>
 
           {error && <div className="notice bad">{error}</div>}
+          {v.message && <div className="notice bad">{v.message}</div>}
 
           {mode === 'single' && (
             <>
-              <div className="field">
+              <div className={v.fieldCls('name')}>
                 <label htmlFor="al-name">Name</label>
                 <input
                   id="al-name"
-                  className="input"
+                  className={v.cls('name')}
                   autoFocus
                   placeholder="Priya Nair"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => { setName(e.target.value); v.clear('name'); }}
                 />
               </div>
 
-              <div className="field">
+              <div className={v.fieldCls('phone')}>
                 <label htmlFor="al-phone">Number</label>
                 <input
                   id="al-phone"
-                  className="input"
+                  className={v.cls('phone')}
                   placeholder="+91 98204 41209"
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
+                  onChange={(e) => { setPhone(e.target.value); v.clear('phone'); }}
                 />
               </div>
 

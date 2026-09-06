@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { useValidation } from '../useValidation.js';
 
 export default function Connect({ onConnectionChange }) {
   const [status, setStatus] = useState(null);
@@ -11,6 +12,7 @@ export default function Connect({ onConnectionChange }) {
   const [savingCloud, setSavingCloud] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const vc = useValidation(); // Cloud API details form
   const poll = useRef(null);
 
   async function refresh() {
@@ -77,6 +79,11 @@ export default function Connect({ onConnectionChange }) {
   }
 
   async function saveCloud() {
+    if (!vc.check({
+      phoneNumberId: { value: cloudDraft.phoneNumberId, label: 'Phone number ID' },
+      verifyToken: { value: cloudDraft.verifyToken, label: 'Verify token' },
+      token: { value: cloudDraft.token, label: 'Access token', validate: (t) => !!t.trim() || !!cloud?.hasToken }
+    })) return;
     setSavingCloud(true);
     setError('');
     try {
@@ -188,27 +195,29 @@ export default function Connect({ onConnectionChange }) {
               value={`${origin}${cloud?.webhookUrl || status.cloud.webhookPath}`} />
           </div>
 
-          <div className="field">
+          {vc.message && <div className="notice bad">{vc.message}</div>}
+
+          <div className={vc.fieldCls('phoneNumberId')}>
             <label htmlFor="wpn">Phone number ID</label>
-            <input id="wpn" className="input num" placeholder="e.g. 1036363452890512"
+            <input id="wpn" className={vc.cls('phoneNumberId', 'input num')} placeholder="e.g. 1036363452890512"
               value={cloudDraft.phoneNumberId}
-              onChange={(e) => setCloudDraft((d) => ({ ...d, phoneNumberId: e.target.value }))} />
+              onChange={(e) => { setCloudDraft((d) => ({ ...d, phoneNumberId: e.target.value })); vc.clear('phoneNumberId'); }} />
           </div>
 
-          <div className="field">
+          <div className={vc.fieldCls('token')}>
             <label htmlFor="wtok">Access token</label>
-            <input id="wtok" className="input num" type="password"
+            <input id="wtok" className={vc.cls('token', 'input num')} type="password"
               placeholder={cloud?.hasToken ? '•••••••• saved — leave blank to keep' : 'Permanent token from Meta'}
               value={cloudDraft.token}
-              onChange={(e) => setCloudDraft((d) => ({ ...d, token: e.target.value }))} />
+              onChange={(e) => { setCloudDraft((d) => ({ ...d, token: e.target.value })); vc.clear('token'); }} />
           </div>
 
-          <div className="field">
+          <div className={vc.fieldCls('verifyToken')}>
             <label htmlFor="wvt">Verify token (paste into Meta)</label>
             <div style={{ display: 'flex', gap: 8 }}>
-              <input id="wvt" className="input num" style={{ flex: 1 }}
+              <input id="wvt" className={vc.cls('verifyToken', 'input num')} style={{ flex: 1 }}
                 value={cloudDraft.verifyToken}
-                onChange={(e) => setCloudDraft((d) => ({ ...d, verifyToken: e.target.value }))} />
+                onChange={(e) => { setCloudDraft((d) => ({ ...d, verifyToken: e.target.value })); vc.clear('verifyToken'); }} />
               <button type="button" className="btn sm" onClick={genVerifyToken}>Generate</button>
             </div>
           </div>

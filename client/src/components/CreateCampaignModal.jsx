@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, money } from '../api.js';
+import { useValidation } from '../useValidation.js';
 import LocationPicker from './LocationPicker.jsx';
 import InterestPicker from './InterestPicker.jsx';
 
@@ -87,6 +88,7 @@ export default function CreateCampaignModal({ creatives, initialCreativeId, onCl
   const [page, setPage] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const v = useValidation();
 
   useEffect(() => { api.get('/meta/page').then(setPage).catch(() => {}); }, []);
   useEffect(() => {
@@ -128,9 +130,11 @@ export default function CreateCampaignModal({ creatives, initialCreativeId, onCl
   const needsTos = chosen?.destination_type === 'lead_form' && page && page.leadgen_tos_accepted === false;
 
   async function save() {
-    if (!name.trim()) return setError('Give the campaign a name.');
+    if (!v.check({
+      name: { value: name, label: 'Campaign name' },
+      budget: { value: budget, label: `Daily budget (min ₹${MIN_BUDGET})`, validate: (x) => Number(x) >= MIN_BUDGET }
+    })) return;
     if (!chosen) return setError('Pick a creative that is set up for campaigns.');
-    if (Number(budget) < MIN_BUDGET) return setError(`Daily budget must be at least ₹${MIN_BUDGET}.`);
     if (loc.mode === 'nearby' && !loc.center) return setError('Set where your shop is (current location or PIN code).');
     if (loc.mode === 'cities' && loc.cities.length === 0) return setError('Add at least one city.');
     setBusy(true);
@@ -182,6 +186,7 @@ export default function CreateCampaignModal({ creatives, initialCreativeId, onCl
           </div>
 
           {error && <div className="notice bad">{error}</div>}
+          {v.message && <div className="notice bad">{v.message}</div>}
 
           {ready.length === 0 ? (
             <div className="notice">
@@ -218,14 +223,14 @@ export default function CreateCampaignModal({ creatives, initialCreativeId, onCl
                 </div>
               )}
 
-              <div className="field">
+              <div className={v.fieldCls('name')}>
                 <label htmlFor="cc-name">Campaign name</label>
-                <input id="cc-name" className="input" value={name} onChange={(e) => setName(e.target.value)} />
+                <input id="cc-name" className={v.cls('name')} value={name} onChange={(e) => { setName(e.target.value); v.clear('name'); }} />
               </div>
 
-              <div className="field">
+              <div className={v.fieldCls('budget')}>
                 <label htmlFor="cc-budget">How much to spend per day (₹)</label>
-                <input id="cc-budget" className="input" type="number" min={MIN_BUDGET} value={budget} onChange={(e) => setBudget(e.target.value)} />
+                <input id="cc-budget" className={v.cls('budget')} type="number" min={MIN_BUDGET} value={budget} onChange={(e) => { setBudget(e.target.value); v.clear('budget'); }} />
                 <div style={{ fontSize: 12, color: 'var(--muted-2)', marginTop: 4 }}>
                   Up to ₹{money(Number(budget) || 0)}/day (~₹{money((Number(budget) || 0) * 30)}/month). Most shops start at ₹300–₹500.
                 </div>
@@ -280,7 +285,7 @@ export default function CreateCampaignModal({ creatives, initialCreativeId, onCl
                     <label>What to optimise for</label>
                     <select className="select" value={optGoal} onChange={(e) => setOptGoal(e.target.value)}>
                       <option value="">Recommended</option>
-                      {(OPT_GOALS[chosen?.destination_type] || OPT_GOALS.whatsapp).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                      {(OPT_GOALS[chosen?.destination_type] || OPT_GOALS.whatsapp).map(([gv, gl]) => <option key={gv} value={gv}>{gl}</option>)}
                     </select>
                   </div>
                   <div className="field" style={{ margin: 0 }}>

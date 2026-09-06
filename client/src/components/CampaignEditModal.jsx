@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, money } from '../api.js';
+import { useValidation } from '../useValidation.js';
 import LocationPicker from './LocationPicker.jsx';
 import InterestPicker from './InterestPicker.jsx';
 
@@ -94,6 +95,7 @@ export default function CampaignEditModal({ campaign, creatives, onClose, onInst
 
   const [error, setError] = useState('');
   const [ok, setOk] = useState('');
+  const v = useValidation();
 
   useEffect(() => {
     let alive = true;
@@ -122,6 +124,7 @@ export default function CampaignEditModal({ campaign, creatives, onClose, onInst
   }
 
   async function saveInstant() {
+    if (!v.check({ name: { value: name, label: 'Campaign name' } })) return;
     setSavingInstant(true);
     setError('');
     setOk('');
@@ -188,11 +191,12 @@ export default function CampaignEditModal({ campaign, creatives, onClose, onInst
           <div className="num" style={{ fontSize: 11, color: 'var(--muted-2)', marginBottom: 8 }}>{campaign.id}</div>
 
           {error && <div className="notice bad">{error}</div>}
+          {v.message && <div className="notice bad">{v.message}</div>}
           {ok && <div className="notice" style={{ borderLeftColor: 'var(--good)' }}>{ok}</div>}
 
-          <div className="field">
+          <div className={v.fieldCls('name')}>
             <label>Campaign name</label>
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+            <input className={v.cls('name')} value={name} onChange={(e) => { setName(e.target.value); v.clear('name'); }} />
           </div>
           <div className="field">
             <label>Running?</label>

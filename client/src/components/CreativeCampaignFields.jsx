@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { useValidation } from '../useValidation.js';
 import WhatsAppNumberSetting from './WhatsAppNumberSetting.jsx';
 
 const DEFAULT_CTA = { whatsapp: 'WHATSAPP_MESSAGE', lead_form: 'SIGN_UP', website: 'LEARN_MORE' };
@@ -32,6 +33,10 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
   const [pageInfo, setPageInfo] = useState(null); // { page_id, page_name, leadgen_tos_accepted }
   const [tosNeeded, setTosNeeded] = useState(false); // forced on when Meta rejects for terms
   const [tosBusy, setTosBusy] = useState(false);
+  const v = useValidation();
+  const vf = useValidation(); // the "+ New form" builder
+
+  useEffect(() => { if (!open) { v.reset(); vf.reset(); } }, [open]); // eslint-disable-line
 
   const loadPageInfo = () => api.get('/meta/page').then(setPageInfo).catch(() => {});
 
@@ -103,7 +108,10 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
     });
   }
   async function createForm() {
-    if (!newForm.name.trim()) { setError('Name the form.'); return; }
+    if (!vf.check({
+      name: { value: newForm.name, label: 'Form name' },
+      greeting: { value: newForm.greeting, label: 'Greeting headline' }
+    })) return;
     setBusy(true);
     setError('');
     try {
@@ -144,16 +152,21 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
   }
 
   async function save() {
+    let destination_value = destValue;
+    let link_url = linkUrl;
+    if (destType === 'whatsapp') destination_value = effectiveWa;
+    if (destType === 'website') { destination_value = linkUrl.trim(); link_url = linkUrl.trim(); }
+    if (destType === 'lead_form') link_url = forms.find((f) => f.id === destValue)?.name || link_url;
+
+    const destLabel = { whatsapp: 'WhatsApp number', lead_form: 'Lead form', website: 'Website link' }[destType];
+    if (!v.check({
+      label: { value: label, label: 'Creative name' },
+      dest: { value: destination_value, label: destLabel }
+    })) return;
+
     setBusy(true);
     setError('');
     try {
-      let destination_value = destValue;
-      let link_url = linkUrl;
-      if (destType === 'whatsapp') destination_value = effectiveWa;
-      if (destType === 'website') { destination_value = linkUrl.trim(); link_url = linkUrl.trim(); }
-      if (destType === 'lead_form') link_url = forms.find((f) => f.id === destValue)?.name || link_url;
-      if (!destination_value) { setError('Choose where leads should go.'); setBusy(false); return; }
-
       const updated = await api.patch(`/creatives/${creative.id}`, {
         label: label.trim(),
         headline: headline.trim(),
@@ -179,10 +192,16 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
   const body = (
     <div style={{ display: 'grid', gap: 10 }}>
       {error && <div className="notice bad">{error}</div>}
+      {v.message && <div className="notice bad">{v.message}</div>}
 
-      <div className="field" style={{ margin: 0 }}>
+      <div className={v.fieldCls('label')} style={{ margin: 0 }}>
         <label>Creative name</label>
-        <input className="input" placeholder="Weekend gold offer" value={label} onChange={(e) => setLabel(e.target.value)} />
+        <input
+          className={v.cls('label')}
+          placeholder="Weekend gold offer"
+          value={label}
+          onChange={(e) => { setLabel(e.target.value); v.clear('label'); }}
+        />
       </div>
 
       <div style={{ display: 'grid', gap: 10, padding: 10, border: '1px solid var(--line)', borderRadius: 8 }}>
@@ -211,10 +230,10 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
       <div className="field" style={{ margin: 0 }}>
         <label>When someone taps the ad, they…</label>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 13 }}>
-          {[['whatsapp', 'Message you on WhatsApp'], ['lead_form', 'Fill a quick form'], ['website', 'Go to your website']].map(([v, l]) => (
-            <label key={v} style={{ display: 'flex', gap: 5, alignItems: 'center', cursor: 'pointer' }}>
-              <input type="radio" name={`dest-${creative.id}`} checked={destType === v} onChange={() => pickDest(v)} />
-              {l}
+          {[['whatsapp', 'Message you on WhatsApp'], ['lead_form', 'Fill a quick form'], ['website', 'Go to your website']].map(([dv, dl]) => (
+            <label key={dv} style={{ display: 'flex', gap: 5, alignItems: 'center', cursor: 'pointer' }}>
+              <input type="radio" name={`dest-${creative.id}`} checked={destType === dv} onChange={() => { pickDest(dv); v.clear('dest'); }} />
+              {dl}
             </label>
           ))}
         </div>
@@ -230,7 +249,7 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
         <div className="field" style={{ margin: 0 }}>
           <label>Which form?</label>
           <div style={{ display: 'flex', gap: 8 }}>
-            <select className="select" value={destValue} onChange={(e) => setDestValue(e.target.value)} style={{ flex: 1 }}>
+            <select className={v.cls('dest', 'select')} value={destValue} onChange={(e) => { setDestValue(e.target.value); v.clear('dest'); }} style={{ flex: 1 }}>
               <option value="">{forms.length ? 'Choose a form…' : 'No forms yet'}</option>
               {forms.map((f) => <option key={f.id} value={f.id}>{f.name}{f.fields?.length ? ` (${f.fields.join(', ').toLowerCase()})` : ''}</option>)}
             </select>
@@ -242,13 +261,14 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
       {destType === 'lead_form' && newForm && (
         <div style={{ display: 'grid', gap: 8, padding: '10px', border: '1px solid var(--line)', borderRadius: 8 }}>
           <div className="mono-label">New instant form</div>
-          <div className="field" style={{ margin: 0 }}>
+          {vf.message && <div className="notice bad" style={{ margin: 0 }}>{vf.message}</div>}
+          <div className={vf.fieldCls('name')} style={{ margin: 0 }}>
             <label>Form name (only you see this)</label>
-            <input className="input" value={newForm.name} onChange={(e) => setNewForm((s) => ({ ...s, name: e.target.value }))} />
+            <input className={vf.cls('name')} value={newForm.name} onChange={(e) => { setNewForm((s) => ({ ...s, name: e.target.value })); vf.clear('name'); }} />
           </div>
-          <div className="field" style={{ margin: 0 }}>
+          <div className={vf.fieldCls('greeting')} style={{ margin: 0 }}>
             <label>Greeting headline</label>
-            <input className="input" value={newForm.greeting} onChange={(e) => setNewForm((s) => ({ ...s, greeting: e.target.value }))} />
+            <input className={vf.cls('greeting')} value={newForm.greeting} onChange={(e) => { setNewForm((s) => ({ ...s, greeting: e.target.value })); vf.clear('greeting'); }} />
           </div>
           <div className="field" style={{ margin: 0 }}>
             <label>Short line under the greeting</label>
@@ -320,9 +340,9 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
       )}
 
       {destType === 'website' && (
-        <div className="field" style={{ margin: 0 }}>
+        <div className={v.fieldCls('dest')} style={{ margin: 0 }}>
           <label>Website link</label>
-          <input className="input" placeholder="https://example.com/offer" value={linkUrl} onChange={(e) => { setLinkUrl(e.target.value); setDestValue(e.target.value); }} />
+          <input className={v.cls('dest')} placeholder="https://example.com/offer" value={linkUrl} onChange={(e) => { setLinkUrl(e.target.value); setDestValue(e.target.value); v.clear('dest'); }} />
         </div>
       )}
 

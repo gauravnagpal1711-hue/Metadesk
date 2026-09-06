@@ -296,6 +296,18 @@ tr.has-unread .name { font-weight: 700; }
 }
 .textarea { min-height: 92px; resize: vertical; line-height: 1.5; }
 
+/* Shared form validation (see useValidation.js): a required field left empty
+   on a save attempt gets a red border until it's filled in. */
+.input.is-invalid, .textarea.is-invalid, .select.is-invalid {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+.input.is-invalid:focus, .textarea.is-invalid:focus, .select.is-invalid:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, .15);
+}
+.field.is-invalid label { color: var(--danger); }
+
 .card {
   background: var(--surface);
   border: 1px solid var(--line);
