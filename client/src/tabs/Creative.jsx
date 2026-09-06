@@ -140,10 +140,12 @@ export default function Creative() {
     setPromptModal({ text: buildPrompt({ brief, ratio, forVideo }), phase: 'edit', reviewId: null });
   }
 
-  /** Reopen the review window for an unsaved draft sitting in the gallery. */
-  function reopenReview(c) {
+  /** Edit an unsaved draft that's sitting in the gallery: open the prompt with
+   *  the text it was made from so it can be tweaked and regenerated (which
+   *  replaces this draft). */
+  function editGalleryDraft(c) {
     setOutputKind(c.kind === 'video' ? 'video' : 'image');
-    setPromptModal({ text: c.prompt || '', phase: 'review', reviewId: c.id });
+    setPromptModal({ text: c.prompt || '', phase: 'edit', reviewId: c.id });
   }
 
   /** "Edit further" replaces the current attempt: drop the old review draft
@@ -572,7 +574,7 @@ export default function Creative() {
                 {c.status === 'review' ? (
                   <>
                     <button className="btn sm" onClick={() => keepDraft(c.id)} disabled={busy === 'keep'}>Save to gallery</button>
-                    <button className="btn sm ghost" onClick={() => reopenReview(c)}>Edit</button>
+                    <button className="btn sm ghost" onClick={() => editGalleryDraft(c)}>Edit</button>
                     <button className="btn sm ghost danger" onClick={() => remove(c.id)}>Discard</button>
                   </>
                 ) : (
