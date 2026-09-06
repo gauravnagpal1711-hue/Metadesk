@@ -2,7 +2,7 @@ import express from 'express';
 import { q } from '../db.js';
 import {
   loadConnection, connConfigured, buildTargeting,
-  createCampaign, createAdSet, uploadAdImage, createCreative, createAd, deleteObject
+  createCampaign, createAdSet, uploadAdImage, createCreative, createLeadFormCreative, createAd, deleteObject
 } from '../services/meta.js';
 
 export const campaignBriefsRouter = express.Router();
@@ -230,9 +230,13 @@ campaignBriefsRouter.patch('/:id', async (req, res, next) => {
 
 /**
  * Actually build the brief on Meta — campaign + ad set + creative + ad, all
- * PAUSED — and record the ids. Nothing here ever goes ACTIVE; the user does that
- * with "Start campaign" (PATCH /campaigns/:id { status: 'ACTIVE' }). On any Meta
- * error the half-built campaign is deleted and the brief is left 'info_needed'.
+ * PAUSED — and record the ids. Handles two creative destinations:
+ *   - click-to-WhatsApp  (destination_value = WhatsApp number)
+ *   - lead form / Instant Form (destination_value = leadgen_form id, picked or
+ *     built in "Set up for campaign")
+ * Nothing here ever goes ACTIVE; the user does that with "Start campaign"
+ * (PATCH /campaigns/:id { status: 'ACTIVE' }). On any Meta error the half-built
+ * campaign is deleted and the brief is left 'info_needed'.
  */
 campaignBriefsRouter.post('/:id/launch', async (req, res, next) => {
   try {
@@ -251,8 +255,14 @@ campaignBriefsRouter.post('/:id/launch', async (req, res, next) => {
     const creative = cr[0];
     if (!creative) return res.status(400).json({ error: 'The brief\'s creative no longer exists.' });
     if (creative.status !== 'approved') return res.status(400).json({ error: 'The creative is not approved yet.' });
-    if (creative.destination_type !== 'whatsapp' || !creative.destination_value) {
-      return res.status(400).json({ error: 'This launcher only handles click-to-WhatsApp creatives for now.' });
+
+    const dest = creative.destination_type;
+    if (!['whatsapp', 'lead_form'].includes(dest) || !creative.destination_value) {
+      return res.status(400).json({
+        error: dest === 'website'
+          ? 'Website-click campaigns can\'t be launched from here yet — use WhatsApp or a lead form.'
+          : 'Open "Set up for campaign" on the creative and choose WhatsApp or a lead form, with its details filled in.'
+      });
     }
 
     const conn = await loadConnection(uid);
@@ -261,7 +271,7 @@ campaignBriefsRouter.post('/:id/launch', async (req, res, next) => {
 
     const audience = brief.audience || {};
     const targeting = buildTargeting(audience);
-    const waNumber = String(creative.destination_value).replace(/\D/g, '');
+    const waNumber = String(creative.destination_value).replace(/\D/g, ''); // whatsapp only
 
     let campaignId, adsetId, imageHash, creativeId, adId;
     let step = 'campaign';
@@ -277,18 +287,30 @@ campaignBriefsRouter.post('/:id/launch', async (req, res, next) => {
         pageId: conn.pageId,
         targeting,
         startAt: brief.start_at,
-        endAt: brief.end_at
+        endAt: brief.end_at,
+        destination: dest
       }));
       step = 'image upload';
       imageHash = await uploadAdImage(conn, creative.image_data);
       step = 'creative';
-      ({ id: creativeId } = await createCreative(conn, {
-        name: `${brief.name} — creative`,
-        pageId: conn.pageId,
-        message: creative.primary_text || creative.headline || '',
-        imageHash,
-        waNumber
-      }));
+      if (dest === 'lead_form') {
+        ({ id: creativeId } = await createLeadFormCreative(conn, {
+          name: `${brief.name} — creative`,
+          pageId: conn.pageId,
+          message: creative.primary_text || creative.headline || '',
+          imageHash,
+          leadFormId: String(creative.destination_value).trim(),
+          ctaType: creative.cta_type
+        }));
+      } else {
+        ({ id: creativeId } = await createCreative(conn, {
+          name: `${brief.name} — creative`,
+          pageId: conn.pageId,
+          message: creative.primary_text || creative.headline || '',
+          imageHash,
+          waNumber
+        }));
+      }
       step = 'ad';
       ({ id: adId } = await createAd(conn, { name: `${brief.name} — ad`, adsetId, creativeId }));
     } catch (metaErr) {

@@ -162,7 +162,10 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
         destination_type: destType,
         destination_value,
         cta_type: ctaType,
-        link_url
+        link_url,
+        // Setting up a campaign is the "use this creative" decision — approve it
+        // now so a campaign brief is created and lands in the Campaigns tab.
+        status: 'approved'
       });
       onSaved(updated);
       setOpen(false);
@@ -294,7 +297,7 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
           </div>
           <div className="field" style={{ margin: 0 }}>
             <label>Privacy policy link (required by Meta)</label>
-            <input className="input" placeholder="https://your-site.com/privacy — or leave blank" value={newForm.privacy_url} onChange={(e) => setNewForm((s) => ({ ...s, privacy_url: e.target.value }))} />
+            <input className="input" placeholder="https://your-site.com/privacy — leave blank to use this app's page" value={newForm.privacy_url} onChange={(e) => setNewForm((s) => ({ ...s, privacy_url: e.target.value }))} />
           </div>
 
           {(pageInfo?.leadgen_tos_accepted === false || tosNeeded) && (

@@ -15,6 +15,7 @@ import { campaignEditsRouter } from './routes/campaignEdits.js';
 import { metaTargetingRouter } from './routes/metaTargeting.js';
 import { whatsappRouter, attachPending } from './routes/whatsapp.js';
 import { reachUsRouter } from './routes/reachUs.js';
+import { legalRouter } from './routes/legal.js';
 import { facebookRouter } from './routes/facebook.js';
 import { loadConnection, connConfigured, listCampaigns, listLeadForms, fetchFormLeads, flattenLead, normalisePhone } from './services/meta.js';
 import { startAllWebSessions } from './services/whatsappWeb.js';
@@ -33,6 +34,9 @@ if (process.env.NODE_ENV !== 'production') {
 
 app.get('/api/health', (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 app.use('/api/auth', authRouter);
+
+// Public legal pages (no login) — Meta needs a reachable Privacy Policy URL.
+app.use('/', legalRouter);
 
 // The OAuth callback must be reachable without the app cookie (Facebook redirects to it).
 // Everything else under /api/facebook still requires the app login.

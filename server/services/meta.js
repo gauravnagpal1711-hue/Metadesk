@@ -295,17 +295,24 @@ export async function createCampaign(conn, { name, objective }) {
   });
 }
 
-/** Click-to-WhatsApp ad set: promoted page, WHATSAPP destination, PAUSED. */
+/**
+ * Ad set for a brief launch, always PAUSED. `destination` picks the flavour:
+ *   'whatsapp'  → CONVERSATIONS goal, WHATSAPP destination (click-to-WhatsApp)
+ *   'lead_form' → LEAD_GENERATION goal, ON_AD destination (Instant Form)
+ * Both promote the connected page.
+ */
 export async function createAdSet(conn, {
-  name, campaignId, dailyBudgetRupees, optimizationGoal, pageId, targeting, bidCapRupees, startAt, endAt
+  name, campaignId, dailyBudgetRupees, optimizationGoal, pageId, targeting,
+  bidCapRupees, startAt, endAt, destination = 'whatsapp'
 }) {
+  const isLeadForm = destination === 'lead_form';
   const body = {
     name,
     campaign_id: campaignId,
     daily_budget: Math.round(Number(dailyBudgetRupees) * 100),
     billing_event: 'IMPRESSIONS',
-    optimization_goal: optimizationGoal || 'CONVERSATIONS',
-    destination_type: 'WHATSAPP',
+    optimization_goal: optimizationGoal || (isLeadForm ? 'LEAD_GENERATION' : 'CONVERSATIONS'),
+    destination_type: isLeadForm ? 'ON_AD' : 'WHATSAPP',
     promoted_object: { page_id: String(pageId) },
     targeting,
     status: 'PAUSED'
@@ -346,6 +353,33 @@ export async function createCreative(conn, { name, pageId, message, imageHash, w
           image_hash: imageHash,
           link: `https://api.whatsapp.com/send?phone=${waNumber}`,
           call_to_action: { type: 'WHATSAPP_MESSAGE', value: { app_destination: 'WHATSAPP' } }
+        }
+      }
+    }
+  });
+}
+
+/**
+ * Instant-Form ad creative: tapping the CTA opens the lead form on Facebook.
+ * `link` is Meta's documented placeholder for lead ads — the form id in the
+ * call_to_action is what actually drives it.
+ */
+export async function createLeadFormCreative(conn, { name, pageId, message, imageHash, leadFormId, ctaType }) {
+  return graph(`${accountId(conn)}/adcreatives`, {
+    conn,
+    method: 'POST',
+    body: {
+      name,
+      object_story_spec: {
+        page_id: String(pageId),
+        link_data: {
+          message: message || '',
+          image_hash: imageHash,
+          link: 'https://fb.me/',
+          call_to_action: {
+            type: ctaType || 'SIGN_UP',
+            value: { lead_gen_form_id: String(leadFormId) }
+          }
         }
       }
     }
@@ -552,7 +586,12 @@ export async function createLeadForm(conn, spec = {}) {
     questions.push(opts.length ? { type: 'CUSTOM', label, options: opts.map((value) => ({ value })) } : { type: 'CUSTOM', label });
   }
 
-  const privacyUrl = (spec.privacy_url || '').trim() || 'https://www.facebook.com/privacy/policy/';
+  // Prefer the advertiser's own URL; fall back to the app-hosted /privacy page
+  // (see routes/legal.js) so a form can be created without hunting for one.
+  const appPrivacy = process.env.PUBLIC_URL
+    ? `${process.env.PUBLIC_URL.replace(/\/$/, '')}/privacy`
+    : 'https://www.facebook.com/privacy/policy/';
+  const privacyUrl = (spec.privacy_url || '').trim() || appPrivacy;
   const body = {
     name: (spec.name || 'Ads Desk form').slice(0, 250),
     locale: 'EN_US',
