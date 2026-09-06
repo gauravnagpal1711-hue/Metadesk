@@ -310,6 +310,13 @@ export async function createAdSet(conn, {
   bidCapRupees, startAt, endAt, destination = 'whatsapp'
 }) {
   const isLeadForm = destination === 'lead_form';
+  // Meta mandates Advantage+ Audience for LEAD_GENERATION and rejects an ad set
+  // that sets advantage_audience:0 — with the error mis-blamed on
+  // optimization_goal (subcode 2490408). buildTargeting always writes a 0, so
+  // force it back on for the lead-form path.
+  const adSetTargeting = isLeadForm
+    ? { ...targeting, targeting_automation: { ...(targeting.targeting_automation || {}), advantage_audience: 1 } }
+    : targeting;
   const body = {
     name,
     campaign_id: campaignId,
@@ -318,7 +325,7 @@ export async function createAdSet(conn, {
     optimization_goal: optimizationGoal || (isLeadForm ? 'LEAD_GENERATION' : 'CONVERSATIONS'),
     destination_type: isLeadForm ? 'ON_AD' : 'WHATSAPP',
     promoted_object: { page_id: String(pageId) },
-    targeting,
+    targeting: adSetTargeting,
     status: 'PAUSED'
   };
   if (bidCapRupees) {
