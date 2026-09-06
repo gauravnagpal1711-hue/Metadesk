@@ -62,9 +62,9 @@ export default function Creative() {
   const [brief, setBrief] = useState('');
   const [size, setSize] = useState(SIZES[0].v);
   const [videoAspect, setVideoAspect] = useState(VIDEO_ASPECTS[0].v);
-  const [attachment, setAttachment] = useState(null); // { dataUrl, mime, name }
+  const [attachments, setAttachments] = useState([]); // [{ dataUrl, mime, name }]
   const [recording, setRecording] = useState(false);
-  const [promptModal, setPromptModal] = useState(null); // null closed, else { text }
+  const [promptModal, setPromptModal] = useState(null); // null closed, else { text, phase, reviewId }
   const [gallery, setGallery] = useState([]);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -123,13 +123,20 @@ export default function Creative() {
     setRecording(true);
   }
 
-  function pickAttachment(file) {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setAttachment({ dataUrl: reader.result, mime: file.type, name: file.name });
-    reader.onerror = () => setError('Could not read that file.');
-    reader.readAsDataURL(file);
+  function pickAttachments(fileList) {
+    const files = Array.from(fileList || []);
     if (attachRef.current) attachRef.current.value = '';
+    files.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () =>
+        setAttachments((list) => [...list, { dataUrl: reader.result, mime: file.type, name: file.name }]);
+      reader.onerror = () => setError(`Could not read ${file.name}.`);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function removeAttachment(idx) {
+    setAttachments((list) => list.filter((_, i) => i !== idx));
   }
 
   function openPromptModal() {
@@ -167,7 +174,7 @@ export default function Creative() {
     try {
       await dropPriorReview();
       const created = await api.post('/creatives/image', {
-        prompt: promptText, size, referenceImage: attachment?.dataUrl
+        prompt: promptText, size, referenceImages: attachments.map((a) => a.dataUrl)
       });
       setGallery((g) => [created, ...g]);
       setPromptModal({ text: promptText, phase: 'review', reviewId: created.id });
@@ -204,7 +211,7 @@ export default function Creative() {
     try {
       await dropPriorReview();
       const created = await api.post('/creatives/video', {
-        prompt: promptText, aspectRatio: videoAspect, referenceImage: attachment?.dataUrl
+        prompt: promptText, aspectRatio: videoAspect, referenceImages: attachments.map((a) => a.dataUrl)
       });
       setGallery((g) => [created, ...g]);
       pollVideoStatus(created.id);
@@ -221,20 +228,23 @@ export default function Creative() {
     else generate(promptModal.text);
   }
 
-  async function upload(file) {
-    if (!file) return;
+  async function upload(fileList) {
+    const files = Array.from(fileList || []);
+    if (fileRef.current) fileRef.current.value = '';
+    if (!files.length) return;
     setBusy('upload');
     setError('');
     try {
-      const dataUrl = await new Promise((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = () => resolve(r.result);
-        r.onerror = () => reject(new Error('Could not read that file.'));
-        r.readAsDataURL(file);
-      });
-      const created = await api.post('/creatives/upload', { imageData: dataUrl });
-      setGallery((g) => [created, ...g]);
-      if (fileRef.current) fileRef.current.value = '';
+      for (const file of files) {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result);
+          r.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+          r.readAsDataURL(file);
+        });
+        const created = await api.post('/creatives/upload', { imageData: dataUrl });
+        setGallery((g) => [created, ...g]);
+      }
     } catch (e) {
       setError(e.message);
     } finally {
@@ -278,6 +288,55 @@ export default function Creative() {
   const reviewCreative = promptModal?.reviewId
     ? gallery.find((c) => c.id === promptModal.reviewId)
     : null;
+
+  /** Multi-file reference attachments — shown under the brief and inside the
+   *  prompt modal; the same picker feeds both. */
+  const attachmentsBlock = (
+    <div>
+      <button type="button" className="btn ghost sm" onClick={() => attachRef.current?.click()}>
+        📎 Attach reference files
+      </button>
+      {attachments.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+          {attachments.map((a, i) => (
+            <div key={i} style={{ position: 'relative', width: 56 }}>
+              {a.mime?.startsWith('image/') ? (
+                <img
+                  src={a.dataUrl}
+                  alt={a.name}
+                  title={a.name}
+                  style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6, display: 'block' }}
+                />
+              ) : (
+                <div
+                  title={a.name}
+                  style={{
+                    width: 56, height: 56, borderRadius: 6, display: 'flex', alignItems: 'center',
+                    justifyContent: 'center', background: 'var(--line-soft)', fontSize: 10,
+                    padding: 4, overflow: 'hidden', textAlign: 'center'
+                  }}
+                >
+                  {a.name.slice(0, 14)}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => removeAttachment(i)}
+                aria-label={`Remove ${a.name}`}
+                style={{
+                  position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: '50%',
+                  border: 'none', background: 'var(--danger)', color: '#fff', fontSize: 12,
+                  lineHeight: '18px', cursor: 'pointer', padding: 0
+                }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <>
@@ -342,21 +401,16 @@ export default function Creative() {
               ref={attachRef}
               type="file"
               accept="image/*"
+              multiple
               style={{ display: 'none' }}
-              onChange={(e) => pickAttachment(e.target.files?.[0])}
+              onChange={(e) => pickAttachments(e.target.files)}
             />
           </div>
         </div>
 
         {recording && <div style={{ fontSize: 12.5, color: 'var(--accent)' }}>🎙️ Listening… speak now, tap the mic again to stop.</div>}
 
-        {attachment && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <img src={attachment.dataUrl} alt="" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 6 }} />
-            <span style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{attachment.name}</span>
-            <button className="btn ghost sm" onClick={() => setAttachment(null)}>Remove</button>
-          </div>
-        )}
+        {attachmentsBlock}
 
         <div className="provider-row">
           <span className="dot" style={{ background: providers[outputKind] ? 'var(--good)' : 'var(--muted-2)' }} />
@@ -468,7 +522,7 @@ export default function Creative() {
                     />
                   </div>
 
-                  <div className="field" style={{ marginBottom: 0 }}>
+                  <div className="field" style={{ marginBottom: 10 }}>
                     {outputKind === 'video' ? (
                       <>
                         <label htmlFor="modal-aspect">Aspect ratio</label>
@@ -484,6 +538,11 @@ export default function Creative() {
                         </select>
                       </>
                     )}
+                  </div>
+
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label>Reference files (optional)</label>
+                    {attachmentsBlock}
                   </div>
 
                   <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
@@ -530,8 +589,9 @@ export default function Creative() {
           ref={fileRef}
           type="file"
           accept="image/*"
+          multiple
           style={{ display: 'none' }}
-          onChange={(e) => upload(e.target.files?.[0])}
+          onChange={(e) => upload(e.target.files)}
         />
       </div>
 

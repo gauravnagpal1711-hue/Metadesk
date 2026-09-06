@@ -72,7 +72,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   const [data, setData] = useState(null);
   const [view, setView] = useState('chat');
   const [draft, setDraft] = useState('');
-  const [attachment, setAttachment] = useState(null); // { dataUrl, mime, name }
+  const [attachments, setAttachments] = useState([]); // [{ dataUrl, mime, name }]
   const [suggestions, setSuggestions] = useState([]);
   const [suggesting, setSuggesting] = useState(false);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
@@ -155,18 +155,27 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   ].sort((a, b) => new Date(b.ts) - new Date(a.ts));
 
   async function send() {
-    if (!draft.trim() && !attachment) return;
+    if (!draft.trim() && attachments.length === 0) return;
     setSending(true);
     setError('');
     try {
-      await api.post(`/leads/${leadId}/messages`, {
-        body: draft.trim() || undefined,
-        mediaData: attachment?.dataUrl,
-        mediaMime: attachment?.mime,
-        fileName: attachment?.name
-      });
+      if (attachments.length === 0) {
+        await api.post(`/leads/${leadId}/messages`, { body: draft.trim() || undefined });
+      } else {
+        // One WhatsApp message per file; the typed text rides along as the
+        // caption on the first one.
+        for (let i = 0; i < attachments.length; i++) {
+          const a = attachments[i];
+          await api.post(`/leads/${leadId}/messages`, {
+            body: i === 0 && draft.trim() ? draft.trim() : undefined,
+            mediaData: a.dataUrl,
+            mediaMime: a.mime,
+            fileName: a.name
+          });
+        }
+      }
       setDraft('');
-      setAttachment(null);
+      setAttachments([]);
       setSuggestions([]);
       if (fileRef.current) fileRef.current.value = '';
       await load();
@@ -216,12 +225,16 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
     }
   }
 
-  function pickFile(file) {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setAttachment({ dataUrl: reader.result, mime: file.type, name: file.name });
-    reader.onerror = () => setError('Could not read that file.');
-    reader.readAsDataURL(file);
+  function pickFile(fileList) {
+    const files = Array.from(fileList || []);
+    if (fileRef.current) fileRef.current.value = '';
+    files.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = () =>
+        setAttachments((list) => [...list, { dataUrl: reader.result, mime: file.type, name: file.name }]);
+      reader.onerror = () => setError(`Could not read ${file.name}.`);
+      reader.readAsDataURL(file);
+    });
   }
 
   async function addNote() {
@@ -778,21 +791,29 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
                 ))}
               </div>
             )}
-            {attachment && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderTop: '1px solid var(--line)', background: 'var(--surface-soft)' }}>
-                {attachment.mime.startsWith('image/') ? (
-                  <img src={attachment.dataUrl} alt="" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 6 }} />
-                ) : (
-                  <span className="tag off">{attachment.mime.split('/')[0] || 'file'}</span>
-                )}
-                <span style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{attachment.name}</span>
-                <button className="btn ghost sm" style={{ marginLeft: 'auto' }} onClick={() => { setAttachment(null); if (fileRef.current) fileRef.current.value = ''; }}>
-                  Remove
-                </button>
+            {attachments.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '8px 14px', borderTop: '1px solid var(--line)', background: 'var(--surface-soft)' }}>
+                {attachments.map((a, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, border: '1px solid var(--line)', borderRadius: 6, padding: '3px 4px 3px 3px', background: 'var(--surface)' }}>
+                    {a.mime?.startsWith('image/') ? (
+                      <img src={a.dataUrl} alt="" style={{ width: 30, height: 30, objectFit: 'cover', borderRadius: 4 }} />
+                    ) : (
+                      <span className="tag off">{a.mime?.split('/')[0] || 'file'}</span>
+                    )}
+                    <span style={{ fontSize: 12, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
+                    <button
+                      className="btn ghost sm"
+                      onClick={() => setAttachments((list) => list.filter((_, x) => x !== i))}
+                      aria-label={`Remove ${a.name}`}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
             <div className="wa-composer">
-              <input ref={fileRef} type="file" style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files?.[0])} />
+              <input ref={fileRef} type="file" multiple style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files)} />
               <button className="wa-icon-btn" onClick={() => fileRef.current?.click()} aria-label="Attach file" title="Attach file">
                 📎
               </button>
@@ -817,7 +838,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
                 onKeyDown={(e) => e.key === 'Enter' && send()}
                 style={{ flex: 1 }}
               />
-              <button className="wa-send" onClick={send} disabled={sending || (!draft.trim() && !attachment)} aria-label="Send">
+              <button className="wa-send" onClick={send} disabled={sending || (!draft.trim() && attachments.length === 0)} aria-label="Send">
                 {sending ? '…' : '➤'}
               </button>
             </div>

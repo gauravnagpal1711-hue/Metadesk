@@ -36,9 +36,9 @@ creativesRouter.post('/copy', async (req, res, next) => {
  *  after 30 days unless the user Saves it). */
 creativesRouter.post('/image', async (req, res, next) => {
   try {
-    const { prompt, size, referenceImage, headline, primary_text, cta } = req.body || {};
+    const { prompt, size, referenceImage, referenceImages, headline, primary_text, cta } = req.body || {};
     if (!prompt) return res.status(400).json({ error: 'Write a prompt first.' });
-    const { provider, dataUrl } = await generateImage(prompt, { size, referenceImage });
+    const { provider, dataUrl } = await generateImage(prompt, { size, referenceImage, referenceImages });
     const { rows } = await q(
       `INSERT INTO creatives (kind, prompt, headline, primary_text, cta, provider, image_data, status, review_expires_at, user_id)
        VALUES ('image',$1,$2,$3,$4,$5,$6,'review', now() + interval '30 days', $7) RETURNING *`,
@@ -55,9 +55,9 @@ creativesRouter.post('/image', async (req, res, next) => {
  *  to find out when it's ready. */
 creativesRouter.post('/video', async (req, res, next) => {
   try {
-    const { prompt, aspectRatio, referenceImage, headline, primary_text, cta } = req.body || {};
+    const { prompt, aspectRatio, referenceImage, referenceImages, headline, primary_text, cta } = req.body || {};
     if (!prompt) return res.status(400).json({ error: 'Write a prompt first.' });
-    const { provider, operationName } = await startVideo(prompt, { aspectRatio, referenceImage });
+    const { provider, operationName } = await startVideo(prompt, { aspectRatio, referenceImage, referenceImages });
     const { rows } = await q(
       `INSERT INTO creatives (kind, prompt, headline, primary_text, cta, provider, video_status, video_operation_name, status, review_expires_at, user_id)
        VALUES ('video',$1,$2,$3,$4,$5,'pending',$6,'review', now() + interval '30 days', $7) RETURNING *`,

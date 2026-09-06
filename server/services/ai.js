@@ -72,17 +72,26 @@ export function copyProvider() {
   return process.env.ANTHROPIC_API_KEY ? 'anthropic' : null;
 }
 
+/** One or many reference images: accepts `referenceImages` (array of data URLs)
+ *  and/or a single legacy `referenceImage`, returns a clean array. */
+function referenceList({ referenceImages, referenceImage } = {}) {
+  const list = Array.isArray(referenceImages) ? referenceImages.slice() : [];
+  if (referenceImage) list.unshift(referenceImage);
+  return list.filter(Boolean);
+}
+
 /**
  * @param {string} prompt
- * @param {object} opts { size, referenceImage (data URL) }
+ * @param {object} opts { size, referenceImage (data URL), referenceImages (data URL[]) }
  * @returns {Promise<{provider:string, dataUrl:string}>}
  */
 export async function generateImage(prompt, opts = {}) {
   const provider = imageProvider();
   if (!provider) throw new Error('Add OPENAI_API_KEY, REPLICATE_API_TOKEN, or a Gemini/Vertex service account to generate images.');
-  if (provider === 'openai') return openaiImage(prompt, opts);
-  if (provider === 'vertex') return vertexImage(prompt, opts);
-  return replicateImage(prompt, opts);
+  const o = { ...opts, referenceImages: referenceList(opts) };
+  if (provider === 'openai') return openaiImage(prompt, o);
+  if (provider === 'vertex') return vertexImage(prompt, o);
+  return replicateImage(prompt, o);
 }
 
 const IMAGE_ASPECT_RATIOS = { '1024x1024': '1:1', '1024x1536': '2:3', '1536x1024': '3:2' };
@@ -94,11 +103,10 @@ function parseDataUrl(dataUrl) {
   return { mimeType, data };
 }
 
-async function vertexImage(prompt, { size, referenceImage } = {}) {
+async function vertexImage(prompt, { size, referenceImages = [] } = {}) {
   const ai = vertexAI();
-  const contents = referenceImage
-    ? [{ inlineData: parseDataUrl(referenceImage) }, { text: prompt }]
-    : prompt;
+  const parts = referenceImages.map((r) => ({ inlineData: parseDataUrl(r) }));
+  const contents = parts.length ? [...parts, { text: prompt }] : prompt;
   const res = await ai.models.generateContent({
     model: GEMINI_IMAGE_MODEL,
     contents,
@@ -114,10 +122,12 @@ async function vertexImage(prompt, { size, referenceImage } = {}) {
  * the operation name to poll with pollVideo(). Aspect ratio only: 16:9 or 9:16.
  * A referenceImage (data URL), when given, becomes the video's starting frame.
  */
-export async function startVideo(prompt, { aspectRatio = '16:9', referenceImage } = {}) {
+export async function startVideo(prompt, { aspectRatio = '16:9', referenceImage, referenceImages } = {}) {
   if (videoProvider() !== 'vertex') throw new Error('Add a Gemini/Vertex service account to generate video.');
   const ai = vertexAI();
-  const ref = referenceImage ? parseDataUrl(referenceImage) : null;
+  // Veo takes a single starting frame — use the first reference if several were sent.
+  const first = referenceImage || (Array.isArray(referenceImages) ? referenceImages[0] : null);
+  const ref = first ? parseDataUrl(first) : null;
   const operation = await ai.models.generateVideos({
     model: GEMINI_VIDEO_MODEL,
     prompt,
@@ -145,13 +155,14 @@ export async function pollVideo(operationName) {
   return { done: true, dataUrl: `data:${video.mimeType || 'video/mp4'};base64,${video.videoBytes}` };
 }
 
-async function openaiImage(prompt, { size = '1024x1024', referenceImage } = {}) {
-  if (referenceImage) {
+async function openaiImage(prompt, { size = '1024x1024', referenceImages = [] } = {}) {
+  if (referenceImages.length) {
     const form = new FormData();
     form.append('model', 'gpt-image-1');
     form.append('prompt', prompt);
     form.append('size', size);
-    form.append('image', dataUrlToBlob(referenceImage), 'reference.png');
+    // gpt-image-1 edits accept several reference images.
+    referenceImages.forEach((r, i) => form.append('image[]', dataUrlToBlob(r), `reference-${i}.png`));
     const res = await fetch('https://api.openai.com/v1/images/edits', {
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
