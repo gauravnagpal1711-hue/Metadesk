@@ -290,14 +290,13 @@ campaignBriefsRouter.post('/:id/launch', async (req, res, next) => {
       const objective = dest === 'lead_form' ? 'OUTCOME_LEADS' : brief.objective;
       ({ id: campaignId } = await createCampaign(conn, { name: brief.name, objective }));
       step = 'ad set';
-      // A brief flipped from WhatsApp to lead-form keeps its old
-      // optimization_goal (e.g. CONVERSATIONS) in the saved audience — that's
-      // invalid for an Instant Form ad set, so only pass a lead-valid goal.
-      const LEAD_GOALS = ['LEAD_GENERATION', 'QUALITY_LEAD'];
+      // The saved audience may carry an optimization_goal that a plain Instant
+      // Form ad set can't use: CONVERSATIONS (left over from a WhatsApp creative)
+      // or QUALITY_LEAD (needs a connected CRM/conversion we don't wire up).
+      // Meta rejects both as subcode 2490408 on optimization_goal, so the
+      // lead-form path always uses LEAD_GENERATION.
       const savedGoal = audience.advanced?.optimization_goal;
-      const optimizationGoal = dest === 'lead_form'
-        ? (LEAD_GOALS.includes(savedGoal) ? savedGoal : 'LEAD_GENERATION')
-        : savedGoal;
+      const optimizationGoal = dest === 'lead_form' ? 'LEAD_GENERATION' : savedGoal;
       ({ id: adsetId } = await createAdSet(conn, {
         name: `${brief.name} — ad set`,
         campaignId,

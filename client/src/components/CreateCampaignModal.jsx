@@ -15,7 +15,9 @@ const DEST_LABEL = {
 };
 const OPT_GOALS = {
   whatsapp: [['CONVERSATIONS', 'More conversations (default)'], ['LINK_CLICKS', 'More clicks'], ['REACH', 'Reach more people']],
-  lead_form: [['LEAD_GENERATION', 'More leads (default)'], ['QUALITY_LEAD', 'Higher-quality leads'], ['LINK_CLICKS', 'More clicks']],
+  // QUALITY_LEAD ("conversion leads") needs a connected CRM Meta can read lead
+  // quality from — not wired up here, and it fails the launch — so it's out.
+  lead_form: [['LEAD_GENERATION', 'More leads (default)'], ['LINK_CLICKS', 'More clicks']],
   website: [['LINK_CLICKS', 'More clicks (default)'], ['LANDING_PAGE_VIEWS', 'More page views'], ['REACH', 'Reach more people']]
 };
 
