@@ -214,6 +214,32 @@ export async function listAdSets(conn, campaignId) {
   }));
 }
 
+/** Ads inside one campaign (id + status). */
+export async function listAds(conn, campaignId) {
+  const data = await graph(`${campaignId}/ads`, {
+    conn,
+    params: { fields: 'id,name,status,effective_status', limit: 200 }
+  });
+  return data.data || [];
+}
+
+/**
+ * Turn a whole campaign on: the campaign, its ad sets and their ads all need to
+ * be ACTIVE for Meta to deliver. Our launcher builds all three PAUSED, so
+ * flipping only the campaign leaves the ad "Processing" and off.
+ */
+export async function activateCampaignTree(conn, campaignId) {
+  await setStatus(conn, campaignId, 'ACTIVE');
+  const adsets = await listAdSets(conn, campaignId).catch(() => []);
+  for (const a of adsets) {
+    if (a.status !== 'ACTIVE') await setStatus(conn, a.id, 'ACTIVE').catch(() => {});
+  }
+  const ads = await listAds(conn, campaignId).catch(() => []);
+  for (const ad of ads) {
+    if (ad.status !== 'ACTIVE') await setStatus(conn, ad.id, 'ACTIVE').catch(() => {});
+  }
+}
+
 /** Pause / resume a campaign or ad set. status is ACTIVE or PAUSED. */
 export async function setStatus(conn, objectId, status) {
   return graph(objectId, { conn, method: 'POST', params: { status } });

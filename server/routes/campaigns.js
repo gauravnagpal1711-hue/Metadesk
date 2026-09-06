@@ -6,6 +6,7 @@ import {
   listCampaigns,
   listAdSets,
   setStatus,
+  activateCampaignTree,
   setDailyBudget,
   renameObject
 } from '../services/meta.js';
@@ -89,7 +90,9 @@ campaignsRouter.patch('/:id', async (req, res, next) => {
     const { status, daily_budget, name } = req.body || {};
     const changes = [];
     if (status) {
-      await setStatus(conn, req.params.id, status);
+      // ACTIVE must cascade to the ad sets and ads or nothing delivers.
+      if (status === 'ACTIVE') await activateCampaignTree(conn, req.params.id);
+      else await setStatus(conn, req.params.id, status);
       await q('UPDATE campaigns SET status=$2, effective_status=$2 WHERE id=$1 AND user_id=$3', [req.params.id, status, req.user.id]);
       changes.push(`status → ${status}`);
     }
