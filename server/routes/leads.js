@@ -573,7 +573,7 @@ leadsRouter.patch('/bulk-update', async (req, res, next) => {
           [id, stage_id, isLost, lost_reason || null, uid]
         );
         if (rowCount) {
-          await q(`INSERT INTO activity (lead_id, kind, detail, user_id) VALUES ($1,'moved',$2,$3)`, [id, `Moved to ${s[0]?.name || 'a stage'} (bulk)`, uid]);
+          await q(`INSERT INTO activity (lead_id, kind, detail, user_id) VALUES ($1,'moved',$2,$3)`, [id, movedDetail(s[0], lost_reason, ' (bulk)'), uid]);
           moved++;
         }
       }
@@ -907,7 +907,14 @@ async function checkStageMoveRequirements(userId, leadId, stageId, { appointment
       blocked: `${missing.join(' and ').replace(/^a/, 'A')} is required to move a lead into "${stage.name}".`
     };
   }
-  return { stage };
+  return { stage, existingLostReason: leadRow[0]?.lost_reason };
+}
+
+/** Builds the activity detail line for a stage move, folding in the lost reason. */
+function movedDetail(stage, effectiveLostReason, suffix = '') {
+  const base = `Moved to ${stage?.name || 'a stage'}${suffix}`;
+  const reason = effectiveLostReason && String(effectiveLostReason).trim();
+  return stage?.is_lost && reason ? `${base} — lost reason: "${reason}"` : base;
 }
 
 leadsRouter.patch('/:id', async (req, res, next) => {
@@ -922,7 +929,8 @@ leadsRouter.patch('/:id', async (req, res, next) => {
       const check = await checkStageMoveRequirements(uid, req.params.id, stage_id, { appointment_date, followup_date, lost_reason });
       if (check.blocked) return res.status(400).json({ error: check.blocked, needs_lost_reason: check.needsLostReason });
       stageIsLost = !!check.stage?.is_lost;
-      await q('INSERT INTO activity (lead_id, kind, detail, user_id) VALUES ($1, $2, $3, $4)', [req.params.id, 'moved', `Moved to ${check.stage?.name || 'a stage'}`, uid]);
+      const effLostReason = (lost_reason && String(lost_reason).trim()) || check.existingLostReason;
+      await q('INSERT INTO activity (lead_id, kind, detail, user_id) VALUES ($1, $2, $3, $4)', [req.params.id, 'moved', movedDetail(check.stage, effLostReason), uid]);
     }
     const { rows } = await q(
       `UPDATE leads SET
@@ -976,7 +984,8 @@ leadsRouter.patch('/:id/move', async (req, res, next) => {
       [req.params.id, stage_id, appointment_date, followup_date, !!check.stage?.is_lost, lost_reason || null, uid]
     );
     if (!rows.length) return res.status(404).json({ error: 'Lead not found.' });
-    await q('INSERT INTO activity (lead_id, kind, detail, user_id) VALUES ($1, $2, $3, $4)', [req.params.id, 'moved', `Moved to ${check.stage?.name || 'a stage'}`, uid]);
+    const effLostReason = (lost_reason && String(lost_reason).trim()) || check.existingLostReason;
+    await q('INSERT INTO activity (lead_id, kind, detail, user_id) VALUES ($1, $2, $3, $4)', [req.params.id, 'moved', movedDetail(check.stage, effLostReason), uid]);
     res.json(rows[0]);
   } catch (e) {
     next(e);
