@@ -96,3 +96,29 @@ export async function fetchPages(token) {
     if (!res.ok) throw new Error(json.error?.message || 'Could not list pages.');
     return json.data;
 }
+
+/**
+ * One batched read of everything the onboarding checklist inspects: the profile,
+ * ad accounts (with billing/status fields) and Pages (with the caller's task
+ * list). Each sub-request is tolerated on its own so a single permission gap
+ * doesn't blank the whole checklist.
+ */
+export async function fetchOnboardingSnapshot(token) {
+    const adFields = 'account_id,name,account_status,disable_reason,currency,timezone_name,funding_source,funding_source_details{id,display_string,type}';
+    const [meRes, adRes, pageRes] = await Promise.all([
+        fetch(`${GRAPH}/me?fields=id,name&access_token=${token}`),
+        fetch(`${GRAPH}/me/adaccounts?fields=${adFields}&limit=200&access_token=${token}`),
+        fetch(`${GRAPH}/me/accounts?fields=id,name,tasks&limit=200&access_token=${token}`),
+    ]);
+    const [me, ad, page] = await Promise.all([meRes.json(), adRes.json(), pageRes.json()]);
+    return {
+        me: meRes.ok ? me : null,
+        adAccounts: adRes.ok ? (ad.data || []) : [],
+        pages: pageRes.ok ? (page.data || []) : [],
+        errors: [
+            !meRes.ok && (me.error?.message || 'profile read failed'),
+            !adRes.ok && (ad.error?.message || 'ad-account read failed'),
+            !pageRes.ok && (page.error?.message || 'page read failed'),
+        ].filter(Boolean),
+    };
+}

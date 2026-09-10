@@ -208,7 +208,7 @@ export default function App() {
             <Leads query={query} onQueryChange={setQuery} onBoardLoaded={onBoardLoaded} syncSignal={syncSignal} campaigns={campaigns} />
           )}
           {tab === 'insights' && <Insights campaigns={campaigns} syncSignal={syncSignal} />}
-          {tab === 'facebook' && <Facebook onConnectionChange={refreshConnections} />}
+          {tab === 'facebook' && <Facebook onConnectionChange={refreshConnections} onNavigate={setTab} />}
           {tab === 'connect' && <Connect onConnectionChange={refreshConnections} />}
           {tab === 'reachus' && <ReachUs />}
         </div>

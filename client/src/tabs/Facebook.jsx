@@ -1,13 +1,19 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import OnboardingChecklist from '../components/OnboardingChecklist.jsx';
 
-export default function Facebook({ onConnectionChange }) {
+export default function Facebook({ onConnectionChange, onNavigate }) {
   const [status, setStatus] = useState(null);
   const [options, setOptions] = useState(null);
   const [adAccountId, setAdAccountId] = useState('');
   const [pageId, setPageId] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const pickerRef = useRef(null);
+
+  const focusPicker = useCallback(() => {
+    pickerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -93,6 +99,12 @@ export default function Facebook({ onConnectionChange }) {
         </div>
       )}
 
+      <OnboardingChecklist
+        onNavigate={onNavigate}
+        onFocusPicker={focusPicker}
+        onRefreshed={refresh}
+      />
+
       <div className="grid2">
         <div className="card">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -140,7 +152,7 @@ export default function Facebook({ onConnectionChange }) {
           </div>
         </div>
 
-        <div className="card">
+        <div className="card" ref={pickerRef}>
           <h2>Choose account & page</h2>
           <p style={{ color: 'var(--muted)', marginTop: 0, fontSize: 13 }}>
             Pick which ad account to manage and which page's lead forms to pull from.
