@@ -64,26 +64,35 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onRefre
       return;
     }
     if (a.target === 'whatsapp') onNavigate?.('connect');
-    else onFocusPicker?.();
+    else if (a.target === 'picker') onFocusPicker?.();
+    else if (a.target) onNavigate?.(a.target);
   }
 
   if (!data) return null;
 
   const steps = data.steps || [];
   const doneCount = steps.filter((s) => s.status === 'done').length;
+  const pct = steps.length ? Math.round((doneCount / steps.length) * 100) : 0;
+  const allDone = steps.length > 0 && doneCount === steps.length;
 
   return (
     <div className="card" style={{ marginBottom: 20 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <h2 style={{ margin: 0 }}>Setup checklist</h2>
-        <span className={`pill-status ${data.ready ? 'good' : ''}`} style={{ marginLeft: 'auto' }}>
+        <h2 style={{ margin: 0 }}>Your growth checklist</h2>
+        <span className={`pill-status ${allDone ? 'good' : data.ready ? 'good' : ''}`} style={{ marginLeft: 'auto' }}>
           <span className="dot" />
-          {data.ready ? 'Ready to run ads' : `${doneCount} of ${steps.length} done`}
+          {allDone ? 'Your ad is live' : data.ready ? `Connected — ${doneCount} of ${steps.length} done` : `${doneCount} of ${steps.length} done`}
         </span>
       </div>
+      <div style={{ height: 6, borderRadius: 999, background: 'var(--line)', overflow: 'hidden', margin: '10px 0' }}>
+        <div style={{
+          height: '100%', width: `${pct}%`, borderRadius: 999,
+          background: allDone ? 'var(--good)' : 'var(--accent)', transition: 'width .25s'
+        }} />
+      </div>
       <p style={{ color: 'var(--muted)', margin: '4px 0 12px', fontSize: 13 }}>
-        Do these once. Tap a step to see exactly what to do. Buttons that say "Meta" open a Facebook
-        window — finish there, close it, and this list ticks itself off.
+        Every step here either happens inside Ads Desk, or opens Meta for the one screen only Facebook can
+        show you — finish there, close it, and this list ticks itself off automatically.
       </p>
 
       {error && <div className="notice bad">{error}</div>}
@@ -172,9 +181,13 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onRefre
         </div>
       )}
 
-      {data.ready && (
+      {allDone ? (
         <div className="notice" style={{ borderLeftColor: 'var(--good)', marginTop: 12 }}>
-          <strong>All set.</strong> Go to "Advertise your Brand" to make your first ad.
+          <strong>You're live.</strong> Your first campaign is running on Meta.
+        </div>
+      ) : data.ready && (
+        <div className="notice" style={{ borderLeftColor: 'var(--good)', marginTop: 12 }}>
+          <strong>Facebook connected.</strong> Keep going below to make and launch your first ad.
         </div>
       )}
     </div>

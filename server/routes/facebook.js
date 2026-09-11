@@ -10,6 +10,7 @@ import {
   fetchOnboardingSnapshot
 } from '../services/facebookAuth.js';
 import { loadConnection, saveConnection, clearConnection, safeConn, resolveWhatsappNumber } from '../services/meta.js';
+import { q } from '../db.js';
 
 export const facebookRouter = express.Router();
 
@@ -218,6 +219,84 @@ facebookRouter.get('/onboarding', async (req, res, next) => {
     });
 
     const ready = steps.every((s) => s.status === 'done');
+
+    // Growth stages: connecting Facebook/WhatsApp is "ready to run ads", but the
+    // journey to an actually-running ad continues here. Each is auto-detected
+    // from the app's own tables (no Meta round trip needed) and stays visible
+    // so the checklist reads as one continuous path, not a dead end at "ready".
+    const [{ rows: [creativeRow] }, { rows: [briefRow] }, { rows: [launchRow] }, { rows: [liveRow] }] = await Promise.all([
+      q(`SELECT count(*)::int AS n FROM creatives WHERE user_id = $1 AND status <> 'review'`, [req.user.id]),
+      q(`SELECT count(*)::int AS n FROM campaign_briefs WHERE user_id = $1 AND daily_budget IS NOT NULL AND creative_id IS NOT NULL`, [req.user.id]),
+      q(`SELECT count(*)::int AS n FROM campaign_briefs WHERE user_id = $1 AND status IN ('created','live')`, [req.user.id]),
+      q(`SELECT count(*)::int AS n FROM campaigns WHERE user_id = $1 AND status = 'ACTIVE'`, [req.user.id])
+    ]);
+    const hasCreative = creativeRow.n > 0;
+    const hasBrief = briefRow.n > 0;
+    const hasLaunched = launchRow.n > 0;
+    const isLive = liveRow.n > 0;
+
+    steps.push({
+      key: 'creative',
+      group: 'growth',
+      title: 'Make your first ad design',
+      oneLiner: hasCreative ? 'You have a saved ad design.' : 'An image or short video customers will see.',
+      why: 'This is the artwork your ad shows — generate one with AI or upload your own.',
+      how: [
+        'Open the "Advertise your Brand" tab.',
+        'Generate an image/video, or tap "Upload content" to use your own.',
+        'Tap "Save to gallery".'
+      ],
+      status: hasCreative ? 'done' : 'todo',
+      action: hasCreative ? null : { type: 'app', target: 'creative', label: 'Open Advertise your Brand' }
+    });
+
+    steps.push({
+      key: 'campaign_setup',
+      group: 'growth',
+      title: 'Set your budget and audience',
+      oneLiner: hasBrief ? 'Campaign details are saved.' : 'Daily budget, who to target, and your WhatsApp number.',
+      why: 'Ads Desk needs this before it can build the campaign on Meta.',
+      how: [
+        'On your saved design, tap "Set up for campaign".',
+        'Fill in headline, daily budget, city/area and audience.',
+        'Save it.'
+      ],
+      status: hasBrief ? 'done' : 'todo',
+      action: hasBrief ? null : { type: 'app', target: 'creative', label: 'Open Advertise your Brand' }
+    });
+
+    steps.push({
+      key: 'launch',
+      group: 'growth',
+      title: 'Create the campaign on Meta',
+      oneLiner: hasLaunched ? 'Campaign created on Meta (paused).' : 'Builds the real campaign — paused, so nothing spends yet.',
+      why: 'This actually creates the campaign, ad set, creative and ad on Meta, always paused first.',
+      how: [
+        'Open the Campaigns tab.',
+        'Find your campaign and tap "Set campaign".'
+      ],
+      status: hasLaunched ? 'done' : 'todo',
+      action: hasLaunched ? null : { type: 'app', target: 'campaigns', label: 'Open Campaigns' }
+    });
+
+    steps.push({
+      key: 'golive',
+      group: 'growth',
+      title: 'Start the campaign',
+      oneLiner: isLive ? 'Your ad is live and running.' : 'Nothing spends money until you flip this on yourself.',
+      why: 'The last step — you review the paused campaign, then start it when you\'re ready to spend.',
+      how: [
+        'Open the Campaigns tab.',
+        'Review budget, audience and creative.',
+        'Tap "Start campaign".'
+      ],
+      status: isLive ? 'done' : 'todo',
+      action: isLive ? null : { type: 'app', target: 'campaigns', label: 'Open Campaigns' }
+    });
+
+    if (snap.errors.length) {
+      console.warn(`[Facebook onboarding] user ${req.user.id} partial Graph read: ${snap.errors.join(' | ')}`);
+    }
     res.json({ connected: true, ready, steps, errors: snap.errors });
   } catch (e) {
     next(e);
@@ -246,9 +325,15 @@ facebookRouter.get('/callback', async (req, res) => {
       <script>try{window.opener&&window.opener.postMessage('fb-connected','*')}catch(e){}; setTimeout(()=>window.close(),1200)</script>
       </body>`);
 
-  if (error) return close(error_description || String(error), false);
+  if (error) {
+    console.error(`[Facebook OAuth] Meta returned an error: ${error} — ${error_description || ''}`);
+    return close(error_description || String(error), false);
+  }
   const pending = state && pendingStates.get(state);
-  if (!pending) return close('The login session expired. Please try again.', false);
+  if (!pending) {
+    console.warn(`[Facebook OAuth] callback with unknown/expired state (state=${state || 'none'})`);
+    return close('The login session expired. Please try again.', false);
+  }
   pendingStates.delete(state);
 
   try {
@@ -263,8 +348,10 @@ facebookRouter.get('/callback', async (req, res) => {
       pageId: null,
       pageToken: null
     });
+    console.log(`[Facebook OAuth] user ${pending.userId} connected as "${me.name}" (fbUserId=${me.id})`);
     close(`Signed in as ${me.name}. Choose your ad account and page back in the app.`, true);
   } catch (e) {
+    console.error(`[Facebook OAuth] user ${pending.userId} connect failed: ${e.message}`);
     close(e.message, false);
   }
 });

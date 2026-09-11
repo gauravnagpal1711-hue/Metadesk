@@ -51,6 +51,7 @@ authRouter.post('/signup', async (req, res, next) => {
       [username, bcrypt.hashSync(password, 10), businessName]
     );
     issueCookie(res, rows[0].id);
+    console.log(`[auth] new tenant signed up: user ${rows[0].id} ("${username}")`);
     res.json({ ok: true, user: publicUser(rows[0]) });
   } catch (e) {
     next(e);
