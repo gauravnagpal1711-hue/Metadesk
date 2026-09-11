@@ -9,7 +9,7 @@ import { api } from '../api.js';
  * popup closes. Each step is collapsed to a title + one line; tap to expand the
  * "why" and the "how".
  */
-export default function OnboardingChecklist({ onNavigate, onFocusPicker, onRefreshed }) {
+export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConnectFacebook, onRefreshed }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [busyKey, setBusyKey] = useState('');
@@ -63,9 +63,11 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onRefre
       }, 1000);
       return;
     }
-    if (a.target === 'whatsapp') onNavigate?.('connect');
-    else if (a.target === 'picker') onFocusPicker?.();
-    else if (a.target) onNavigate?.(a.target);
+    const NAVIGABLE_TARGETS = new Set(['creative', 'campaigns']);
+    if (a.target === 'signin') onConnectFacebook?.();
+    else if (a.target === 'whatsapp') onNavigate?.('connect');
+    else if (NAVIGABLE_TARGETS.has(a.target)) onNavigate?.(a.target);
+    else onFocusPicker?.();
   }
 
   if (!data) return null;

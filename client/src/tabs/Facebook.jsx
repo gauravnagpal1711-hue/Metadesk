@@ -102,6 +102,7 @@ export default function Facebook({ onConnectionChange, onNavigate }) {
       <OnboardingChecklist
         onNavigate={onNavigate}
         onFocusPicker={focusPicker}
+        onConnectFacebook={connect}
         onRefreshed={refresh}
       />
 
