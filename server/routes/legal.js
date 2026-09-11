@@ -27,9 +27,10 @@ function page({ title, body }) {
 }
 
 legalRouter.get('/privacy', (req, res) => {
-  const name = process.env.PRIVACY_BUSINESS_NAME || 'this business';
+  const name = process.env.PRIVACY_BUSINESS_NAME || 'Ads Desk';
   const email = process.env.PRIVACY_CONTACT_EMAIL || '';
   const updated = process.env.PRIVACY_LAST_UPDATED || new Date().toISOString().slice(0, 10);
+  const contact = email ? ` <a href="mailto:${email}">${email}</a>` : ' the contact details on our website.';
 
   res.type('html').send(page({
     title: 'Privacy Policy',
@@ -37,37 +38,70 @@ legalRouter.get('/privacy', (req, res) => {
 <h1>Privacy Policy</h1>
 <p class="muted">Last updated: ${updated}</p>
 
-<p>This policy explains how ${name} ("we", "us") handles the personal
-information you provide when you respond to one of our advertisements — for
-example by submitting a lead form or starting a WhatsApp conversation.</p>
+<p>${name} ("we", "us") is an advertising management platform. Businesses
+("account holders") sign up to connect their own Meta (Facebook/Instagram)
+advertising account, Facebook Page, and WhatsApp number, so they can create
+and manage ad campaigns and respond to the leads those ads generate. This
+policy covers two audiences: <strong>account holders</strong> who use Ads Desk,
+and <strong>end customers</strong> who respond to an account holder's ads.</p>
 
-<h2>Information we collect</h2>
-<p>Contact details you choose to share, such as your name, phone number, email
-address, city, and any answers you give to questions in a lead form or in your
-messages to us.</p>
+<h2>Information we collect from account holders</h2>
+<ul>
+<li><strong>Account info</strong> — the username and password used to sign up.</li>
+<li><strong>Meta Platform Data</strong> — when an account holder connects Facebook, we request
+access (via Facebook Login) to their profile name, the ad accounts and Pages
+they manage, and campaign/ad-set/ad data for those assets. We use this solely
+to create, read, and manage advertising campaigns on the account holder's
+behalf, and never for any other purpose. Access tokens are stored encrypted at
+rest on our servers and are never exposed to the browser or to other account
+holders.</li>
+<li><strong>WhatsApp data</strong> — if an account holder connects a WhatsApp number (via
+Meta's Cloud API or by pairing their own device), we process the messages sent
+and received through that number so they can be shown in the account holder's
+lead inbox and so automated replies can be suggested.</li>
+<li><strong>Creative content</strong> — images, video, and text an account holder uploads or
+generates for their ads.</li>
+</ul>
 
-<h2>How we use it</h2>
-<p>Only to respond to your enquiry: to contact you about our products and
-services, arrange appointments, and follow up on your interest. We do not sell
-your information.</p>
+<h2>Information we collect from end customers</h2>
+<p>When someone responds to an account holder's ad — for example by starting a
+WhatsApp conversation or submitting a lead form — we collect the contact
+details they share (such as name, phone number, and any message content) on
+behalf of, and for the sole use of, the account holder whose ad they responded
+to. We do not use this information for our own marketing, and one account
+holder never has access to another's end-customer data.</p>
+
+<h2>How we use information</h2>
+<p>To operate the service an account holder signed up for: creating and
+managing their ad campaigns via the Meta Marketing API, receiving and
+displaying their leads, and (optionally) suggesting ad copy or reply text using
+AI. We do not sell personal information to anyone.</p>
 
 <h2>Sharing</h2>
-<p>We use Meta Platforms, Inc. (Facebook, Instagram, WhatsApp) to run our
-advertising and receive your enquiry, and tools we operate ourselves to manage
-follow-up. We share your details with service providers only as needed to
-respond to you, and where the law requires it.</p>
+<p>We share data with Meta Platforms, Inc. (to run advertising and deliver
+WhatsApp messages on the account holder's behalf) and with AI providers we use
+to generate ad creative and copy suggestions (Anthropic, OpenAI, and/or
+Google), strictly to provide that functionality. We do not share data with any
+other third party except where required by law.</p>
 
 <h2>Retention</h2>
-<p>We keep enquiry details for as long as needed to serve you and to meet our
-legal and accounting obligations, then delete them.</p>
+<p>We retain account and lead data for as long as the account holder's account
+is active, plus a reasonable period afterward for legal and accounting
+purposes, then delete it. An account holder can disconnect their Meta account
+at any time, which immediately revokes and deletes the stored access token.</p>
 
 <h2>Your choices</h2>
-<p>You can ask us to show you the information we hold about you, correct it, or
-delete it. To opt out of further contact, reply “STOP” to any message or contact
-us using the details below.</p>
+<p>Account holders can request a copy of, correct, or delete the data we hold
+for their account by contacting us. End customers who want their data removed
+should contact the business whose ad they responded to, or contact us directly
+and we will forward the request.</p>
+
+<h2>Children</h2>
+<p>Ads Desk is not directed at children and we do not knowingly collect data
+from anyone under 18.</p>
 
 <h2>Contact</h2>
-<p>Questions about this policy or your information:${email ? ` <a href="mailto:${email}">${email}</a>` : ' contact us through the channel you used to reach us.'}</p>
+<p>Questions about this policy or your information:${contact}</p>
 `
   }));
 });
