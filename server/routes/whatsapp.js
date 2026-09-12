@@ -377,7 +377,10 @@ whatsappRouter.post('/quick-replies/sync', async (req, res, next) => {
 
 whatsappRouter.post('/web/connect', async (req, res, next) => {
   try {
-    res.json(await startWeb(req.user.id));
+    const raw = req.body?.phoneNumber;
+    const phoneNumber = raw ? normalisePhone(raw) : null;
+    if (raw && !phoneNumber) return res.status(400).json({ error: 'Enter a valid phone number, digits only.' });
+    res.json(await startWeb(req.user.id, phoneNumber ? { phoneNumber } : {}));
   } catch (e) {
     next(e);
   }

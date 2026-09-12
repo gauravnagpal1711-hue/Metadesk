@@ -19,7 +19,7 @@ const MAX_MEDIA_BYTES = 15 * 1024 * 1024;
 const sessions = new Map();
 
 function blankSession() {
-  return { status: 'disconnected', qr: null, me: null, error: null, sock: null, starting: false };
+  return { status: 'disconnected', qr: null, pairingCode: null, me: null, error: null, sock: null, starting: false };
 }
 function sessionFor(userId) {
   let s = sessions.get(userId);
@@ -64,6 +64,7 @@ export function webStatus(userId) {
     available: true,
     status: s.status,
     qr: s.qr,
+    pairingCode: s.pairingCode,
     me: s.me,
     error: s.error,
     sessionDir: sessionDir(userId)
@@ -253,11 +254,12 @@ async function extractMessage(m) {
 
 /* ---------- per-user socket lifecycle ---------- */
 
-export async function startWeb(userId) {
+export async function startWeb(userId, { phoneNumber } = {}) {
   const s = sessionFor(userId);
   if (s.starting || s.status === 'connected') return webStatus(userId);
   s.starting = true;
   s.error = null;
+  s.pairingCode = null;
 
   let baileys;
   let QRCode;
@@ -284,6 +286,13 @@ export async function startWeb(userId) {
     s.sock = sock;
     s.status = 'pairing';
     sock.ev.on('creds.update', saveCreds);
+
+    // Alternative to scanning a QR — WhatsApp's own "Link with phone number"
+    // flow. Must be requested before the socket finishes registering; the code
+    // is typed into the phone instead of scanning anything.
+    if (phoneNumber && !sock.authState.creds.registered) {
+      s.pairingCode = await sock.requestPairingCode(phoneNumber);
+    }
   } catch (err) {
     s.starting = false;
     s.status = 'error';
@@ -300,6 +309,7 @@ export async function startWeb(userId) {
     if (connection === 'open') {
       s.status = 'connected';
       s.qr = null;
+      s.pairingCode = null;
       s.me = sock.user?.id?.split(':')[0] || null;
       s.starting = false;
       console.log(`WhatsApp Web connected for user ${userId} as ${s.me}`);
@@ -449,6 +459,7 @@ export async function logoutWeb(userId) {
   s.sock = null;
   s.status = 'disconnected';
   s.qr = null;
+  s.pairingCode = null;
   s.me = null;
   s.error = null;
   clearSessionFiles(userId);

@@ -12,6 +12,8 @@ export default function Connect({ onConnectionChange }) {
   const [savingCloud, setSavingCloud] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [pairMethod, setPairMethod] = useState('qr'); // 'qr' | 'phone'
+  const [phoneInput, setPhoneInput] = useState('');
   const vc = useValidation(); // Cloud API details form
   const poll = useRef(null);
 
@@ -39,20 +41,30 @@ export default function Connect({ onConnectionChange }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function connect() {
+  async function connect(phoneNumber) {
     setBusy(true);
     setError('');
     try {
       // Always start from a clean slate — a leftover broken session would
-      // otherwise get silently retried instead of producing a fresh QR.
+      // otherwise get silently retried instead of producing a fresh QR/code.
       await api.post('/whatsapp/web/logout').catch(() => {});
-      await api.post('/whatsapp/web/connect');
+      await api.post('/whatsapp/web/connect', phoneNumber ? { phoneNumber } : {});
       await refresh();
     } catch (e) {
       setError(e.message);
     } finally {
       setBusy(false);
     }
+  }
+
+  function connectWithPhone() {
+    if (!phoneInput.trim()) { setError('Enter the phone number to link.'); return; }
+    connect(phoneInput.trim());
+  }
+
+  function formatPairingCode(code) {
+    if (!code) return '';
+    return code.includes('-') ? code : `${code.slice(0, 4)}-${code.slice(4)}`;
   }
 
   async function disconnect() {
@@ -136,36 +148,94 @@ export default function Connect({ onConnectionChange }) {
       <div className="grid2">
         <div className="card">
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <h2 style={{ margin: 0 }}>Pair by QR</h2>
+            <h2 style={{ margin: 0 }}>Pair WhatsApp Web</h2>
             <span className={`pill-status ${waStatus}`} style={{ marginLeft: 'auto' }}>
-              <span className="dot" />{web.status === 'connected' ? 'Connected' : web.status === 'pairing' ? 'Waiting for scan' : 'Not connected'}
+              <span className="dot" />{web.status === 'connected' ? 'Connected' : web.status === 'pairing' ? 'Waiting to link' : 'Not connected'}
             </span>
           </div>
 
-          <div style={{ display: 'flex', gap: 16, marginTop: 16, alignItems: 'center' }}>
-            {web.status === 'pairing' && web.qr ? (
-              <div className="qr" style={{ flex: '0 0 152px' }}>
-                <img src={web.qr} alt="Scan this QR code with WhatsApp" />
-              </div>
-            ) : (
-              <div className="qr" style={{ flex: '0 0 152px', color: 'var(--muted-2)', fontSize: 12 }}>
-                {web.status === 'connected' ? web.me || 'Linked' : 'No code yet'}
-              </div>
-            )}
-            <ol className="steps">
-              <li>Open WhatsApp on the ad phone.</li>
-              <li>Settings → Linked devices → Link a device.</li>
-              <li>Scan this code. It refreshes automatically.</li>
-            </ol>
-          </div>
+          {web.status !== 'connected' && (
+            <div className="provider-row" style={{ marginTop: 12, gap: 6 }}>
+              <button
+                type="button"
+                className={`btn sm ${pairMethod === 'qr' ? 'primary' : ''}`}
+                onClick={() => setPairMethod('qr')}
+              >
+                Scan QR
+              </button>
+              <button
+                type="button"
+                className={`btn sm ${pairMethod === 'phone' ? 'primary' : ''}`}
+                onClick={() => setPairMethod('phone')}
+              >
+                Enter phone number
+              </button>
+            </div>
+          )}
+
+          {web.status === 'connected' ? (
+            <div style={{ marginTop: 16 }}>Linked as {web.me || 'this number'}.</div>
+          ) : pairMethod === 'qr' ? (
+            <div style={{ display: 'flex', gap: 16, marginTop: 16, alignItems: 'center' }}>
+              {web.status === 'pairing' && web.qr ? (
+                <div className="qr" style={{ flex: '0 0 152px' }}>
+                  <img src={web.qr} alt="Scan this QR code with WhatsApp" />
+                </div>
+              ) : (
+                <div className="qr" style={{ flex: '0 0 152px', color: 'var(--muted-2)', fontSize: 12 }}>
+                  No code yet
+                </div>
+              )}
+              <ol className="steps">
+                <li>Open WhatsApp on the ad phone.</li>
+                <li>Settings → Linked devices → Link a device.</li>
+                <li>Scan this code. It refreshes automatically.</li>
+              </ol>
+            </div>
+          ) : (
+            <div style={{ marginTop: 16 }}>
+              {web.status === 'pairing' && web.pairingCode ? (
+                <>
+                  <div style={{
+                    fontFamily: 'var(--mono)', fontSize: 28, fontWeight: 700, letterSpacing: 2,
+                    textAlign: 'center', padding: '14px 0', background: 'var(--accent-soft)', borderRadius: 10
+                  }}>
+                    {formatPairingCode(web.pairingCode)}
+                  </div>
+                  <ol className="steps" style={{ marginTop: 12 }}>
+                    <li>Open WhatsApp on the ad phone.</li>
+                    <li>Settings → Linked devices → Link a device → "Link with phone number instead".</li>
+                    <li>Type this code. It expires after a couple of minutes.</li>
+                  </ol>
+                </>
+              ) : (
+                <>
+                  <div className="field">
+                    <label htmlFor="wapn">Phone number to link (with country code)</label>
+                    <input
+                      id="wapn"
+                      className="input num"
+                      placeholder="e.g. 919876543210"
+                      value={phoneInput}
+                      onChange={(e) => setPhoneInput(e.target.value)}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           <div style={{ marginTop: 14 }}>
-            {web.status !== 'connected' ? (
-              <button className="btn primary" onClick={connect} disabled={busy}>
+            {web.status === 'connected' ? (
+              <button className="btn danger" onClick={disconnect} disabled={busy}>Unlink this number</button>
+            ) : pairMethod === 'qr' ? (
+              <button className="btn primary" onClick={() => connect()} disabled={busy}>
                 {busy ? 'Starting…' : web.qr ? 'Refresh code' : 'Start pairing'}
               </button>
             ) : (
-              <button className="btn danger" onClick={disconnect} disabled={busy}>Unlink this number</button>
+              <button className="btn primary" onClick={connectWithPhone} disabled={busy}>
+                {busy ? 'Requesting…' : web.pairingCode ? 'Request a new code' : 'Get pairing code'}
+              </button>
             )}
           </div>
 
@@ -173,7 +243,7 @@ export default function Connect({ onConnectionChange }) {
 
           <div className="notice" style={{ marginTop: 16 }}>
             Sessions are stored in <code>{web.sessionDir}</code>. Attach a Railway volume at that path,
-            or you will re-scan the code after every deploy.
+            or you will re-link after every deploy.
           </div>
         </div>
 
