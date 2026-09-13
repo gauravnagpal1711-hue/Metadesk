@@ -16,6 +16,7 @@ import { metaTargetingRouter } from './routes/metaTargeting.js';
 import { whatsappRouter, attachPending } from './routes/whatsapp.js';
 import { reachUsRouter } from './routes/reachUs.js';
 import { legalRouter } from './routes/legal.js';
+import { dataDeletionRouter } from './routes/dataDeletion.js';
 import { facebookRouter } from './routes/facebook.js';
 import { loadConnection, connConfigured, listCampaigns, listLeadForms, fetchFormLeads, flattenLead, normalisePhone } from './services/meta.js';
 import { startAllWebSessions } from './services/whatsappWeb.js';
@@ -37,6 +38,9 @@ app.use('/api/auth', authRouter);
 
 // Public legal pages (no login) — Meta needs a reachable Privacy Policy URL.
 app.use('/', legalRouter);
+
+// Meta Platform callbacks (no login, form-encoded signed_request).
+app.use('/', dataDeletionRouter);
 
 // The OAuth callback must be reachable without the app cookie (Facebook redirects to it).
 // Everything else under /api/facebook still requires the app login.
