@@ -27,7 +27,7 @@ function page({ title, body }) {
 }
 
 legalRouter.get('/privacy', (req, res) => {
-  const name = process.env.PRIVACY_BUSINESS_NAME || 'Ads Desk';
+  const name = process.env.PRIVACY_BUSINESS_NAME || 'Trustura Digital';
   const email = process.env.PRIVACY_CONTACT_EMAIL || '';
   const updated = process.env.PRIVACY_LAST_UPDATED || new Date().toISOString().slice(0, 10);
   const contact = email ? ` <a href="mailto:${email}">${email}</a>` : ' the contact details on our website.';
@@ -38,7 +38,8 @@ legalRouter.get('/privacy', (req, res) => {
 <h1>Privacy Policy</h1>
 <p class="muted">Last updated: ${updated}</p>
 
-<p>${name} ("we", "us") is an advertising management platform. Businesses
+<p>${name} ("we", "us"), a product of Trustura Global Services Pvt. Ltd., is an
+advertising management platform. Businesses
 ("account holders") sign up to connect their own Meta (Facebook/Instagram)
 advertising account, Facebook Page, and WhatsApp number, so they can create
 and manage ad campaigns and respond to the leads those ads generate. This
@@ -107,7 +108,7 @@ from anyone under 18.</p>
 });
 
 legalRouter.get('/terms', (req, res) => {
-  const name = process.env.PRIVACY_BUSINESS_NAME || 'Ads Desk';
+  const name = process.env.PRIVACY_BUSINESS_NAME || 'Trustura Digital';
   const email = process.env.PRIVACY_CONTACT_EMAIL || '';
   const updated = process.env.PRIVACY_LAST_UPDATED || new Date().toISOString().slice(0, 10);
   const contact = email ? ` <a href="mailto:${email}">${email}</a>` : ' the contact details on our website.';
@@ -118,7 +119,8 @@ legalRouter.get('/terms', (req, res) => {
 <h1>Terms of Service</h1>
 <p class="muted">Last updated: ${updated}</p>
 
-<p>These terms govern use of ${name} ("we", "us", "the service") by businesses
+<p>These terms govern use of ${name} ("we", "us", "the service"), a product of
+Trustura Global Services Pvt. Ltd., by businesses
 that sign up for an account ("account holders"). By creating an account you
 agree to these terms.</p>
 

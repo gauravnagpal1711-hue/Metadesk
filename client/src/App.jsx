@@ -106,9 +106,13 @@ export default function App() {
     <div className="shell">
       <aside className="sidebar">
         <div className="sidebar-head">
-          <div className="sidebar-mark">A</div>
+          <div className="sidebar-mark">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M4 5.5H20M12 5.5V19" stroke="white" strokeWidth="2.8" strokeLinecap="round" />
+            </svg>
+          </div>
           <div>
-            <div className="sidebar-title">Ads Desk</div>
+            <div className="sidebar-title">Trustura Digital</div>
             <div className="sidebar-sub">Meta control room</div>
           </div>
         </div>
