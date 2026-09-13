@@ -141,6 +141,12 @@ export default function Login({ onDone }) {
               </button>
             )}
           </div>
+
+          <div className="legal-links">
+            <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+            <span>·</span>
+            <a href="/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a>
+          </div>
         </div>
       </div>
     </div>

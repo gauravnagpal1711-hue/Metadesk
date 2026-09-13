@@ -215,6 +215,14 @@ tr.has-unread .name { font-weight: 700; }
   box-shadow: 0 0 0 3px rgba(23, 163, 74, .14);
 }
 
+.legal-links {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--muted-2);
+  margin-top: 6px;
+}
+.legal-links a { color: inherit; text-decoration: underline; }
+.legal-links a:hover { color: var(--muted); }
+
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
 .topbar {

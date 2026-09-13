@@ -153,6 +153,11 @@ export default function App() {
           >
             Sign out
           </button>
+          <div className="legal-links">
+            <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+            <span>·</span>
+            <a href="/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a>
+          </div>
         </div>
       </aside>
 
