@@ -138,13 +138,85 @@ export default function Connect({ onConnectionChange }) {
 
   if (!status) return null;
   const web = status.web || {};
+  const webAllowed = web.allowed !== false;
   const origin = window.location.origin;
   const waStatus = web.status === 'connected' ? 'good' : web.status === 'pairing' ? 'warn' : '';
+
+  const cloudCard = (
+        <div className="card">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <h2 style={{ margin: 0 }}>Cloud API</h2>
+            <span className={`pill-status ${status.cloud.connected ? 'good' : ''}`} style={{ marginLeft: 'auto' }}>
+              <span className="dot" />{status.cloud.connected ? 'Connected' : 'Not connected'}
+            </span>
+          </div>
+          <p style={{ color: 'var(--muted)', marginTop: 8, fontSize: 12.5 }}>
+            Your own WhatsApp Business number via Meta&apos;s official Cloud API.
+            Enter the credentials from Meta for Developers below; nothing goes in Railway.
+          </p>
+
+          <div className="field" style={{ marginTop: 14 }}>
+            <label htmlFor="cb">Callback URL (paste into Meta)</label>
+            <input id="cb" className="input num" readOnly onFocus={(e) => e.target.select()}
+              value={`${origin}${cloud?.webhookUrl || status.cloud.webhookPath}`} />
+          </div>
+
+          {vc.message && <div className="notice bad">{vc.message}</div>}
+
+          <div className={vc.fieldCls('phoneNumberId')}>
+            <label htmlFor="wpn">Phone number ID</label>
+            <input id="wpn" className={vc.cls('phoneNumberId', 'input num')} placeholder="e.g. 1036363452890512"
+              value={cloudDraft.phoneNumberId}
+              onChange={(e) => { setCloudDraft((d) => ({ ...d, phoneNumberId: e.target.value })); vc.clear('phoneNumberId'); }} />
+          </div>
+
+          <div className={vc.fieldCls('token')}>
+            <label htmlFor="wtok">Access token</label>
+            <input id="wtok" className={vc.cls('token', 'input num')} type="password"
+              placeholder={cloud?.hasToken ? '•••••••• saved — leave blank to keep' : 'Permanent token from Meta'}
+              value={cloudDraft.token}
+              onChange={(e) => { setCloudDraft((d) => ({ ...d, token: e.target.value })); vc.clear('token'); }} />
+          </div>
+
+          <div className={vc.fieldCls('verifyToken')}>
+            <label htmlFor="wvt">Verify token (paste into Meta)</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input id="wvt" className={vc.cls('verifyToken', 'input num')} style={{ flex: 1 }}
+                value={cloudDraft.verifyToken}
+                onChange={(e) => { setCloudDraft((d) => ({ ...d, verifyToken: e.target.value })); vc.clear('verifyToken'); }} />
+              <button type="button" className="btn sm" onClick={genVerifyToken}>Generate</button>
+            </div>
+          </div>
+
+          <button className="btn primary" onClick={saveCloud} disabled={savingCloud}>
+            {savingCloud ? 'Saving…' : 'Save Cloud API details'}
+          </button>
+
+          <div className="provider-row" style={{ marginTop: 16 }}>
+            <span style={{ fontSize: 12.5, color: 'var(--muted-3)' }}>Only message existing leads</span>
+            <button
+              type="button"
+              className={`toggle ${settings.onlyExistingLeads ? 'on' : ''}`}
+              style={{ marginLeft: 'auto' }}
+              onClick={toggleOnlyExisting}
+              aria-pressed={settings.onlyExistingLeads}
+            >
+              <span />
+            </button>
+          </div>
+
+          <ol className="steps" style={{ marginTop: 16 }}>
+            <li>In Meta for Developers, open your app → WhatsApp → API Setup — copy the Phone number ID and a permanent access token.</li>
+            <li>Save them here, then in WhatsApp → Configuration paste the callback URL and verify token above and subscribe to the <code>messages</code> field.</li>
+          </ol>
+        </div>
+  );
 
   return (
     <>
       {error && <div className="notice bad">{error}</div>}
 
+      {!webAllowed ? cloudCard : (
       <div className="grid2">
         <div className="card">
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
@@ -247,74 +319,9 @@ export default function Connect({ onConnectionChange }) {
           </div>
         </div>
 
-        <div className="card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <h2 style={{ margin: 0 }}>Cloud API</h2>
-            <span className={`pill-status ${status.cloud.connected ? 'good' : ''}`} style={{ marginLeft: 'auto' }}>
-              <span className="dot" />{status.cloud.connected ? 'Connected' : 'Not connected'}
-            </span>
-          </div>
-          <p style={{ color: 'var(--muted)', marginTop: 8, fontSize: 12.5 }}>
-            Alternative to QR pairing — your own WhatsApp Business number via Meta&apos;s Cloud API.
-            Enter the credentials from Meta for Developers below; nothing goes in Railway.
-          </p>
-
-          <div className="field" style={{ marginTop: 14 }}>
-            <label htmlFor="cb">Callback URL (paste into Meta)</label>
-            <input id="cb" className="input num" readOnly onFocus={(e) => e.target.select()}
-              value={`${origin}${cloud?.webhookUrl || status.cloud.webhookPath}`} />
-          </div>
-
-          {vc.message && <div className="notice bad">{vc.message}</div>}
-
-          <div className={vc.fieldCls('phoneNumberId')}>
-            <label htmlFor="wpn">Phone number ID</label>
-            <input id="wpn" className={vc.cls('phoneNumberId', 'input num')} placeholder="e.g. 1036363452890512"
-              value={cloudDraft.phoneNumberId}
-              onChange={(e) => { setCloudDraft((d) => ({ ...d, phoneNumberId: e.target.value })); vc.clear('phoneNumberId'); }} />
-          </div>
-
-          <div className={vc.fieldCls('token')}>
-            <label htmlFor="wtok">Access token</label>
-            <input id="wtok" className={vc.cls('token', 'input num')} type="password"
-              placeholder={cloud?.hasToken ? '•••••••• saved — leave blank to keep' : 'Permanent token from Meta'}
-              value={cloudDraft.token}
-              onChange={(e) => { setCloudDraft((d) => ({ ...d, token: e.target.value })); vc.clear('token'); }} />
-          </div>
-
-          <div className={vc.fieldCls('verifyToken')}>
-            <label htmlFor="wvt">Verify token (paste into Meta)</label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input id="wvt" className={vc.cls('verifyToken', 'input num')} style={{ flex: 1 }}
-                value={cloudDraft.verifyToken}
-                onChange={(e) => { setCloudDraft((d) => ({ ...d, verifyToken: e.target.value })); vc.clear('verifyToken'); }} />
-              <button type="button" className="btn sm" onClick={genVerifyToken}>Generate</button>
-            </div>
-          </div>
-
-          <button className="btn primary" onClick={saveCloud} disabled={savingCloud}>
-            {savingCloud ? 'Saving…' : 'Save Cloud API details'}
-          </button>
-
-          <div className="provider-row" style={{ marginTop: 16 }}>
-            <span style={{ fontSize: 12.5, color: 'var(--muted-3)' }}>Only message existing leads</span>
-            <button
-              type="button"
-              className={`toggle ${settings.onlyExistingLeads ? 'on' : ''}`}
-              style={{ marginLeft: 'auto' }}
-              onClick={toggleOnlyExisting}
-              aria-pressed={settings.onlyExistingLeads}
-            >
-              <span />
-            </button>
-          </div>
-
-          <ol className="steps" style={{ marginTop: 16 }}>
-            <li>In Meta for Developers, open your app → WhatsApp → API Setup — copy the Phone number ID and a permanent access token.</li>
-            <li>Save them here, then in WhatsApp → Configuration paste the callback URL and verify token above and subscribe to the <code>messages</code> field.</li>
-          </ol>
-        </div>
+        {cloudCard}
       </div>
+      )}
 
       <div className="card" style={{ marginTop: 20 }}>
         <h2>What happens after pairing</h2>
