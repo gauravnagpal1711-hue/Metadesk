@@ -8,6 +8,7 @@ import Insights from './tabs/Insights.jsx';
 import Connect from './tabs/Connect.jsx';
 import Facebook from './tabs/Facebook.jsx';
 import ReachUs from './tabs/ReachUs.jsx';
+import Flowchart from './tabs/Flowchart.jsx';
 
 const TABS = [
   { id: 'creative', label: 'Advertise your Brand', title: 'Advertise your Brand', sub: 'Brief, image prompts, and creative gallery' },
@@ -16,6 +17,7 @@ const TABS = [
   { id: 'insights', label: 'Insights', title: 'Insights', sub: 'Pipeline conversion, velocity and lead sources' },
   { id: 'facebook', label: 'Facebook', title: 'Facebook', sub: 'OAuth connection, account and lead form mapping' },
   { id: 'connect', label: 'WhatsApp', title: 'WhatsApp', sub: 'Pair a device or point the Cloud API webhook here' },
+  { id: 'flowchart', label: 'How it works', title: 'How it works', sub: 'Live, step-by-step map of what’s done and what’s left' },
   { id: 'reachus', label: 'Reach Us', title: 'Reach Us', sub: 'Send a query straight to WhatsApp' }
 ];
 
@@ -219,6 +221,7 @@ export default function App() {
           {tab === 'insights' && <Insights campaigns={campaigns} syncSignal={syncSignal} />}
           {tab === 'facebook' && <Facebook onConnectionChange={refreshConnections} onNavigate={setTab} />}
           {tab === 'connect' && <Connect onConnectionChange={refreshConnections} />}
+          {tab === 'flowchart' && <Flowchart />}
           {tab === 'reachus' && <ReachUs />}
         </div>
       </main>
