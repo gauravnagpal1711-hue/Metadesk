@@ -1,6 +1,6 @@
 import express from 'express';
 import { q, getSetting, setSetting } from '../db.js';
-import { parseWebhook, downloadCloudMedia } from '../services/whatsappCloud.js';
+import { parseWebhook, downloadCloudMedia, getPhoneNumberInfo } from '../services/whatsappCloud.js';
 import {
   startWeb, logoutWeb, webStatus, onWebMessage, onHistorySync, onQuickReplySync, syncPhoneQuickReplies, onMessageStatus
 } from '../services/whatsappWeb.js';
@@ -240,11 +240,13 @@ whatsappRouter.get('/status', async (req, res, next) => {
 whatsappRouter.get('/cloud', async (req, res, next) => {
   try {
     const wa = await loadWaConnection(req.user.id);
+    const profile = await getPhoneNumberInfo(wa.cloud).catch(() => null);
     res.json({
       phoneNumberId: wa.cloudPhoneNumberId,
       verifyToken: wa.cloudVerifyToken,
       hasToken: Boolean(wa.cloud?.token),
-      webhookUrl: '/api/whatsapp/webhook'
+      webhookUrl: '/api/whatsapp/webhook',
+      profile
     });
   } catch (e) {
     next(e);

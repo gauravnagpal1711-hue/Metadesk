@@ -259,6 +259,18 @@ export default function Connect({ onConnectionChange }) {
             Enter the credentials from Meta for Developers below; nothing goes in Railway.
           </p>
 
+          {cloud?.profile && (
+            <div className="notice" style={{ margin: '10px 0 0' }}>
+              <strong>{cloud.profile.verifiedName || 'Business name pending verification'}</strong>
+              {cloud.profile.displayPhoneNumber && <> · {cloud.profile.displayPhoneNumber}</>}
+              {cloud.profile.qualityRating && (
+                <span style={{ marginLeft: 8, color: 'var(--muted-2)' }}>
+                  Quality: {cloud.profile.qualityRating}
+                </span>
+              )}
+            </div>
+          )}
+
           <div className="field" style={{ marginTop: 14 }}>
             <label htmlFor="cb">Callback URL (paste into Meta)</label>
             <input id="cb" className="input num" readOnly onFocus={(e) => e.target.select()}

@@ -16,6 +16,24 @@ export function cloudConfigured(cfg) {
   return Boolean(cfg && cfg.phoneNumberId && cfg.token);
 }
 
+/** Business-profile info for the connected number — verified name, display
+ *  number and quality rating — so a tenant can confirm which number is live. */
+export async function getPhoneNumberInfo(cfg) {
+  if (!cloudConfigured(cfg)) return null;
+  const res = await fetch(
+    `https://graph.facebook.com/${VERSION}/${cfg.phoneNumberId}?fields=display_phone_number,verified_name,quality_rating,code_verification_status`,
+    { headers: { Authorization: `Bearer ${cfg.token}` } }
+  );
+  const json = await res.json();
+  if (!res.ok) throw new Error(json?.error?.message || 'Could not read WhatsApp business profile.');
+  return {
+    displayPhoneNumber: json.display_phone_number || null,
+    verifiedName: json.verified_name || null,
+    qualityRating: json.quality_rating || null,
+    codeVerificationStatus: json.code_verification_status || null
+  };
+}
+
 export async function sendText(cfg, to, body) {
   if (!cloudConfigured(cfg)) throw new Error('WhatsApp Cloud API is not connected.');
   const res = await fetch(`https://graph.facebook.com/${VERSION}/${cfg.phoneNumberId}/messages`, {
