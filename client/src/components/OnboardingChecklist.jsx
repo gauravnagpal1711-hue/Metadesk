@@ -132,6 +132,15 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConne
                     color: s.status === 'done' ? 'var(--muted)' : 'inherit'
                   }}>
                     {s.title}
+                    {s.optional && s.status !== 'done' && (
+                      <span style={{
+                        marginLeft: 8, fontSize: 10.5, fontWeight: 700, letterSpacing: '.03em',
+                        color: 'var(--muted-2)', border: '1px solid var(--line)', borderRadius: 999,
+                        padding: '1px 7px', verticalAlign: 'middle'
+                      }}>
+                        OPTIONAL
+                      </span>
+                    )}
                   </span>
                   {s.oneLiner && (
                     <span style={{ display: 'block', fontSize: 12.5, color: 'var(--muted)', marginTop: 1 }}>

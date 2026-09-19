@@ -200,13 +200,21 @@ facebookRouter.get('/onboarding', async (req, res, next) => {
           }
     });
 
+    const ready = steps.every((s) => s.status === 'done');
+
+    // Optional, not counted in `ready`: connecting a number here (Baileys pairing
+    // or Cloud API) is one way to get a WhatsApp number, but it's not required
+    // to advertise. Picking "Message you on WhatsApp" as a creative's destination
+    // (CreativeCampaignFields.jsx) prompts for a number right there instead —
+    // that's the point this actually becomes mandatory.
     steps.push({
       key: 'whatsapp',
       title: 'Connect your WhatsApp number',
+      optional: true,
       oneLiner: wa.number
         ? `Customers will message ${wa.number}.`
-        : 'The number customers reach when they tap your ad.',
-      why: 'Your ads send people straight into a WhatsApp chat. Use the number you actually reply on for your shop.',
+        : "Optional — only needed if you pick WhatsApp as an ad's destination.",
+      why: 'Pairing a number here is one way to set it. If you skip this, you\'ll be asked for a number the moment you choose "Message you on WhatsApp" for an ad — it just can\'t be skipped at that point.',
       how: [
         'Open the WhatsApp tab (button below).',
         'Scan the QR code with the phone that has your business number — or enter your WhatsApp Cloud API details.',
@@ -215,8 +223,6 @@ facebookRouter.get('/onboarding', async (req, res, next) => {
       status: wa.number ? 'done' : 'todo',
       action: wa.number ? null : { type: 'app', target: 'whatsapp', label: 'Open WhatsApp tab' }
     });
-
-    const ready = steps.every((s) => s.status === 'done');
 
     // Growth stages: connecting Facebook/WhatsApp is "ready to run ads", but the
     // journey to an actually-running ad continues here. Each is auto-detected
