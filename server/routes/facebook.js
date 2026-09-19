@@ -74,11 +74,9 @@ facebookRouter.get('/onboarding', async (req, res, next) => {
       action: conn.accessToken || !oauthOk ? null : { type: 'app', target: 'signin', label: 'Continue with Facebook' }
     };
 
-    if (!conn.accessToken) {
-      return res.json({ connected: false, ready: false, steps: [signIn], errors: [] });
-    }
-
-    const snap = await fetchOnboardingSnapshot(conn.accessToken);
+    const snap = conn.accessToken
+      ? await fetchOnboardingSnapshot(conn.accessToken)
+      : { pages: [], adAccounts: [], errors: [] };
 
     const anyPage = snap.pages.length > 0;
     const selectedPage = snap.pages.find((p) => p.id === conn.pageId);
@@ -297,7 +295,7 @@ facebookRouter.get('/onboarding', async (req, res, next) => {
     if (snap.errors.length) {
       console.warn(`[Facebook onboarding] user ${req.user.id} partial Graph read: ${snap.errors.join(' | ')}`);
     }
-    res.json({ connected: true, ready, steps, errors: snap.errors });
+    res.json({ connected: !!conn.accessToken, ready, steps, errors: snap.errors });
   } catch (e) {
     next(e);
   }
