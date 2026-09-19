@@ -80,7 +80,7 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
     } catch (e) { setError(e.message); }
   }
 
-  // "Set campaign" — build the brief on Meta now, all PAUSED. No confirm needed:
+  // "Build on Meta" — build the brief on Meta now, all PAUSED. No confirm needed:
   // nothing spends until "Start campaign", and a failure is fully rolled back.
   async function setCampaign(brief) {
     setBriefBusy(brief.id);
@@ -165,14 +165,14 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
       return <button className="btn sm" onClick={() => openDetails(b.creative_id)}>Add campaign details</button>;
     }
     if (b.status === 'ready') {
-      return <button className="btn sm primary" onClick={() => setCampaign(b)}>Set campaign</button>;
+      return <button className="btn sm primary" onClick={() => setCampaign(b)}>Build on Meta</button>;
     }
     if (b.status === 'queued') {
       // A live launch shows "Working…" (briefBusy, above). A brief left in
       // 'queued' with no Meta campaign is stuck — let the user run it.
       return b.meta_campaign_id
-        ? <span className="sub" style={{ color: 'var(--muted)' }}>Creating on Meta…</span>
-        : <button className="btn sm primary" onClick={() => setCampaign(b)}>Create on Meta</button>;
+        ? <span className="sub" style={{ color: 'var(--muted)' }}>Building on Meta…</span>
+        : <button className="btn sm primary" onClick={() => setCampaign(b)}>Build on Meta</button>;
     }
     if (b.status === 'info_needed') {
       return (
@@ -241,11 +241,10 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
                 return (
                   <tr key={`brief-${b.id}`}>
                     <td>
-                      <div className="name">
+                      <div className="name" title={`Internal reference: brief #${b.id}`}>
                         {b.name}
                         <span className="tag good" style={{ marginLeft: 6 }}>Ads Desk</span>
                       </div>
-                      <div className="num" style={{ fontSize: 10.5, color: 'var(--muted-2)', marginTop: 2 }}>brief #{b.id}</div>
                     </td>
                     <td><span className={`tag ${pill.cls}`}>{pill.text}</span></td>
                     <td className="num" style={{ textAlign: 'right' }}>{b.daily_budget ? `₹${money(b.daily_budget)}` : '—'}</td>
@@ -265,11 +264,10 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
               {rows.filter((c) => !createdBriefCampaignIds.has(c.id)).map((c) => (
                 <tr key={c.id}>
                   <td>
-                    <div className="name">
+                    <div className="name" title={`Meta campaign ID: ${c.id}`}>
                       {c.name}
                       {adsDeskIds.has(c.id) && <span className="tag good" style={{ marginLeft: 6 }}>Ads Desk</span>}
                     </div>
-                    <div className="num" style={{ fontSize: 10.5, color: 'var(--muted-2)', marginTop: 2 }}>{c.id}</div>
                   </td>
                   <td><span className={`tag ${c.status === 'ACTIVE' ? 'good' : 'off'}`}>{c.status === 'ACTIVE' ? 'Running' : 'Paused'}</span></td>
                   <td style={{ textAlign: 'right' }}>
@@ -317,7 +315,7 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
               <tbody>
                 {edits.map((e) => (
                   <tr key={`e${e.id}`}>
-                    <td><div className="name">Edit: {e.campaign_name || e.meta_campaign_id}</div><div className="num" style={{ fontSize: 10.5, color: 'var(--muted-2)' }}>change #{e.id}</div></td>
+                    <td><div className="name" title={`Internal reference: change #${e.id}`}>Edit: {e.campaign_name || e.meta_campaign_id}</div></td>
                     <td><span className={`tag ${e.status === 'applied' ? 'good' : e.status === 'ready' ? 'warn' : 'off'}`}>{e.status}</span></td>
                     <td style={{ fontSize: 12.5 }}>
                       {e.status === 'ready' && <>Tell Claude: <code>apply campaign edit #{e.id}</code></>}
@@ -343,7 +341,7 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
             setCreateFor(null);
             setNotice(
               saved.status === 'ready'
-                ? `"${saved.name}" is ready. It's listed below as Paused — press Set campaign to send it to Claude, then Start campaign once it's built on Meta.`
+                ? `"${saved.name}" is ready. It's listed below as Paused — press "Build on Meta", then "Start campaign" once it's built.`
                 : `Saved. Add a daily budget and a location to make "${saved.name}" ready.`
             );
           }}

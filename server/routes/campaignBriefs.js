@@ -18,8 +18,8 @@ export const campaignBriefsRouter = express.Router();
 const CREATIVE_FIELDS =
   'id, kind, headline, primary_text, cta, label, cta_type, destination_type, destination_value, link_url, image_data, video_url, video_status, status, campaign_defaults';
 
-// Once the user has pressed "Set campaign" (queued), Claude has asked a question
-// (info_needed) or built it on Meta (created/live), the app stops recomputing
+// Once the user has pressed "Build on Meta" (queued), Meta has rejected it
+// (info_needed) or it's been built (created/live), the app stops recomputing
 // the brief's status — only an explicit status change moves it from here.
 const LOCKED_STATUSES = ['queued', 'info_needed', 'created', 'live', 'archived'];
 

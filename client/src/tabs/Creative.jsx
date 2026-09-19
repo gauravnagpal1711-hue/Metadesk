@@ -343,8 +343,8 @@ export default function Creative() {
       {error && <div className="notice bad">{error}</div>}
       {someReady && (
         <div className="notice" style={{ borderLeftColor: 'var(--good)' }}>
-          A creative is campaign-ready. Go to the <strong>Campaigns</strong> tab and press <strong>Set campaign</strong> to
-          send it to Claude, then <strong>Start campaign</strong> once Claude has built it on Meta.
+          A creative is campaign-ready. Go to the <strong>Campaigns</strong> tab and press <strong>Build on Meta</strong>,
+          then <strong>Start campaign</strong> once it's built.
         </div>
       )}
 

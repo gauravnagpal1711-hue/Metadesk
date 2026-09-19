@@ -155,7 +155,7 @@ export default function Flowchart() {
     key: 'handoff',
     title: 'Next stop: Campaigns tab',
     icon: '→',
-    detail: 'Open Campaigns → "Set campaign" to build it on Meta (paused, no spend) — that’s a separate tab with its own screen, not covered here.',
+    detail: 'Open Campaigns → "Build on Meta" (paused, no spend) — that’s a separate tab with its own screen, not covered here.',
     status: 'optional'
   });
 

@@ -277,7 +277,7 @@ facebookRouter.get('/onboarding', async (req, res, next) => {
       why: 'This actually creates the campaign, ad set, creative and ad on Meta, always paused first.',
       how: [
         'Open the Campaigns tab.',
-        'Find your campaign and tap "Set campaign".'
+        'Find your campaign and tap "Build on Meta".'
       ],
       status: hasLaunched ? 'done' : 'todo',
       action: hasLaunched ? null : { type: 'app', target: 'campaigns', label: 'Open Campaigns' }
