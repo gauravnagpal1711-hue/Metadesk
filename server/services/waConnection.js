@@ -69,17 +69,3 @@ export async function pairedWebUserIds() {
   const { rows } = await q('SELECT user_id FROM wa_connections WHERE web_paired = true');
   return rows.map((r) => r.user_id);
 }
-
-const LEGACY_WEB_USER_IDS = (process.env.WA_WEB_LEGACY_USER_IDS || '1')
-  .split(',').map((s) => Number(s.trim())).filter((n) => !Number.isNaN(n));
-
-/**
- * Whether a tenant may use the unofficial WhatsApp Web (Baileys) device-pairing
- * flow. Gated to the original legacy account(s) plus anyone already paired —
- * new signups only see the official Cloud API option. Baileys automates a
- * regular WhatsApp number outside Meta's platform, which is a real policy risk
- * to surface to every new tenant / a Meta reviewer by default.
- */
-export function webPairingAllowed(userId, wa) {
-  return LEGACY_WEB_USER_IDS.includes(Number(userId)) || !!wa?.webPaired;
-}

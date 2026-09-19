@@ -6,7 +6,7 @@ import {
 } from '../services/whatsappWeb.js';
 import { normalisePhone } from '../services/meta.js';
 import {
-  loadWaConnection, saveWaConnection, userIdForPhoneNumberId, verifyTokenMatches, webPairingAllowed
+  loadWaConnection, saveWaConnection, userIdForPhoneNumberId, verifyTokenMatches
 } from '../services/waConnection.js';
 
 export const whatsappRouter = express.Router();
@@ -229,7 +229,7 @@ whatsappRouter.get('/status', async (req, res, next) => {
         phoneNumberId: wa.cloudPhoneNumberId,
         webhookPath: '/api/whatsapp/webhook'
       },
-      web: { ...web, allowed: webPairingAllowed(req.user.id, wa) }
+      web
     });
   } catch (e) {
     next(e);
@@ -377,10 +377,6 @@ whatsappRouter.post('/quick-replies/sync', async (req, res, next) => {
 
 whatsappRouter.post('/web/connect', async (req, res, next) => {
   try {
-    const wa = await loadWaConnection(req.user.id);
-    if (!webPairingAllowed(req.user.id, wa)) {
-      return res.status(403).json({ error: 'WhatsApp Web pairing is not available on this account. Use the Cloud API instead.' });
-    }
     const raw = req.body?.phoneNumber;
     const phoneNumber = raw ? normalisePhone(raw) : null;
     if (raw && !phoneNumber) return res.status(400).json({ error: 'Enter a valid phone number, digits only.' });
