@@ -9,6 +9,7 @@ import Connect from './tabs/Connect.jsx';
 import Facebook from './tabs/Facebook.jsx';
 import ReachUs from './tabs/ReachUs.jsx';
 import Flowchart from './tabs/Flowchart.jsx';
+import ReminderPopups from './components/ReminderPopups.jsx';
 
 const TABS = [
   { id: 'creative', label: 'Advertise your Brand', title: 'Advertise your Brand', sub: 'Brief, image prompts, and creative gallery' },
@@ -25,6 +26,7 @@ export default function App() {
   const [authed, setAuthed] = useState(null);
   const [tab, setTab] = useState('leads');
   const [query, setQuery] = useState('');
+  const [openLeadId, setOpenLeadId] = useState(null);
   const [leadCount, setLeadCount] = useState(null);
   const [unreadTotal, setUnreadTotal] = useState(0);
   const [campaigns, setCampaigns] = useState([]);
@@ -216,7 +218,15 @@ export default function App() {
             <Campaigns rows={campaigns} setRows={setCampaigns} conn={campaignsConn} onSynced={refreshCampaigns} />
           )}
           {tab === 'leads' && (
-            <Leads query={query} onQueryChange={setQuery} onBoardLoaded={onBoardLoaded} syncSignal={syncSignal} campaigns={campaigns} />
+            <Leads
+              query={query}
+              onQueryChange={setQuery}
+              onBoardLoaded={onBoardLoaded}
+              syncSignal={syncSignal}
+              campaigns={campaigns}
+              openLeadId={openLeadId}
+              onLeadOpened={() => setOpenLeadId(null)}
+            />
           )}
           {tab === 'insights' && <Insights campaigns={campaigns} syncSignal={syncSignal} />}
           {tab === 'facebook' && <Facebook onConnectionChange={refreshConnections} onNavigate={setTab} />}
@@ -225,6 +235,12 @@ export default function App() {
           {tab === 'reachus' && <ReachUs />}
         </div>
       </main>
+
+      <ReminderPopups
+        enabled={!!authed}
+        onOpenLead={(id) => { setTab('leads'); setOpenLeadId(id); }}
+        onGoToLeads={() => setTab('leads')}
+      />
     </div>
   );
 }

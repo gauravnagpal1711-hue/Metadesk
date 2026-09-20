@@ -41,7 +41,7 @@ function matchesFilters(lead, f, term) {
   return true;
 }
 
-export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = [] }) {
+export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = [], openLeadId, onLeadOpened }) {
   const [stages, setStages] = useState([]);
   const [leads, setLeads] = useState([]);
   const [openId, setOpenId] = useState(null);
@@ -66,6 +66,14 @@ export default function Leads({ query, onBoardLoaded, syncSignal, campaigns = []
     const t = setInterval(() => load().catch(() => {}), 30000);
     return () => clearInterval(t);
   }, [load, syncSignal]);
+
+  // A reminder popup (or anything else outside this tab) asking to jump
+  // straight to one lead's drawer.
+  useEffect(() => {
+    if (!openLeadId) return;
+    setOpenId(openLeadId);
+    onLeadOpened?.();
+  }, [openLeadId, onLeadOpened]);
 
   function setLayoutPersist(next) {
     setLayout(next);

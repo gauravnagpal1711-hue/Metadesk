@@ -433,6 +433,43 @@ leadsRouter.get('/analytics', async (req, res, next) => {
   }
 });
 
+/**
+ * Everything due right now, across tasks, follow-ups and appointments — what
+ * the client pops up as a reminder toast so a due date actually gets acted on
+ * instead of just sitting as a red chip until someone happens to look.
+ * Won/lost leads are excluded: nothing left to follow up on there.
+ */
+leadsRouter.get('/reminders/due', async (req, res, next) => {
+  try {
+    const uid = req.user.id;
+    const { rows: tasks } = await q(
+      `SELECT t.id, 'task' AS type, t.lead_id, t.due_at, t.title, t.kind,
+              l.full_name AS lead_name, l.phone AS lead_phone
+       FROM tasks t JOIN leads l ON l.id = t.lead_id
+       WHERE t.user_id = $1 AND t.done = false AND t.due_at IS NOT NULL AND t.due_at <= now()
+       ORDER BY t.due_at ASC LIMIT 200`,
+      [uid]
+    );
+    const { rows: dateReminders } = await q(
+      `SELECT l.id, 'followup' AS type, l.followup_date AS due_at, l.full_name AS lead_name, l.phone AS lead_phone
+       FROM leads l LEFT JOIN stages s ON s.id = l.stage_id
+       WHERE l.user_id = $1 AND l.followup_date IS NOT NULL AND l.followup_date <= now()
+         AND COALESCE(s.is_won, false) = false AND COALESCE(s.is_lost, false) = false
+       UNION ALL
+       SELECT l.id, 'appointment' AS type, l.appointment_date AS due_at, l.full_name AS lead_name, l.phone AS lead_phone
+       FROM leads l LEFT JOIN stages s ON s.id = l.stage_id
+       WHERE l.user_id = $1 AND l.appointment_date IS NOT NULL AND l.appointment_date <= now()
+         AND COALESCE(s.is_won, false) = false AND COALESCE(s.is_lost, false) = false
+       ORDER BY due_at ASC LIMIT 200`,
+      [uid]
+    );
+    const all = [...tasks, ...dateReminders].sort((a, b) => new Date(a.due_at) - new Date(b.due_at));
+    res.json(all);
+  } catch (e) {
+    next(e);
+  }
+});
+
 /* ---------- tasks ---------- */
 
 /** Cross-lead task queue for the "Today / Overdue" strip. */
