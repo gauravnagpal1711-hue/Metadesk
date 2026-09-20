@@ -2,8 +2,8 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import { q, getSetting, setSetting } from '../db.js';
 import { loadConnection, connConfigured, listLeadForms, fetchFormLeads, flattenLead, normalisePhone } from '../services/meta.js';
-import { sendText, sendMedia, cloudConfigured } from '../services/whatsappCloud.js';
-import { sendWebText, sendWebMedia, webStatus, fetchChatHistory } from '../services/whatsappWeb.js';
+import { sendText, sendMedia, cloudConfigured, sendReaction } from '../services/whatsappCloud.js';
+import { sendWebText, sendWebMedia, webStatus, fetchChatHistory, revokeWebMessage, sendWebReaction } from '../services/whatsappWeb.js';
 import { loadWaConnection } from '../services/waConnection.js';
 import { attachPending } from './whatsapp.js';
 import { suggestReplies, chatProvider } from '../services/ai.js';
@@ -12,12 +12,12 @@ export const leadsRouter = express.Router();
 
 /** Per-lead computed columns shared by the board feed and the table (list) feed. */
 const LEAD_ENRICH = `
-  (SELECT count(*)::int FROM messages m WHERE m.lead_id = l.id) AS message_count,
+  (SELECT count(*)::int FROM messages m WHERE m.lead_id = l.id AND m.deleted_at IS NULL) AS message_count,
   (SELECT count(*)::int FROM messages m
-     WHERE m.lead_id = l.id AND m.direction = 'in' AND m.channel = 'whatsapp'
+     WHERE m.lead_id = l.id AND m.direction = 'in' AND m.channel = 'whatsapp' AND m.deleted_at IS NULL
        AND (l.wa_last_read_at IS NULL OR m.created_at > l.wa_last_read_at)) AS unread_count,
   (SELECT count(*)::int FROM remarks r WHERE r.lead_id = l.id) AS remark_count,
-  (SELECT max(created_at) FROM messages m WHERE m.lead_id = l.id) AS last_message_at,
+  (SELECT max(created_at) FROM messages m WHERE m.lead_id = l.id AND m.deleted_at IS NULL) AS last_message_at,
   (SELECT count(*)::int FROM tasks t WHERE t.lead_id = l.id AND t.done = false) AS open_task_count,
   (SELECT min(due_at) FROM tasks t WHERE t.lead_id = l.id AND t.done = false) AS next_task_due_at,
   (l.campaign_id IS NOT NULL AND EXISTS (
@@ -379,7 +379,7 @@ leadsRouter.get('/analytics', async (req, res, next) => {
          UNION ALL
          SELECT date_trunc('day', m.created_at), 'messages_sent'
          FROM messages m JOIN leads l ON l.id = m.lead_id
-         WHERE m.direction = 'out'${actWhere('m.created_at')}
+         WHERE m.direction = 'out' AND m.deleted_at IS NULL${actWhere('m.created_at')}
          UNION ALL
          SELECT date_trunc('day', r.created_at), 'remarks'
          FROM remarks r JOIN leads l ON l.id = r.lead_id
@@ -624,7 +624,7 @@ leadsRouter.get('/:id', async (req, res, next) => {
       [req.params.id, uid]
     );
     if (!rows.length) return res.status(404).json({ error: 'That lead no longer exists or is pending Meta verification.' });
-    const { rows: messages } = await q('SELECT * FROM messages WHERE lead_id=$1 AND user_id=$2 ORDER BY created_at ASC', [req.params.id, uid]);
+    const { rows: messages } = await q('SELECT * FROM messages WHERE lead_id=$1 AND user_id=$2 AND deleted_at IS NULL ORDER BY created_at ASC', [req.params.id, uid]);
     const { rows: remarks } = await q('SELECT * FROM remarks WHERE lead_id=$1 AND user_id=$2 ORDER BY created_at DESC', [req.params.id, uid]);
     const { rows: activity } = await q('SELECT * FROM activity WHERE lead_id=$1 AND user_id=$2 ORDER BY created_at DESC LIMIT 50', [req.params.id, uid]);
     const { rows: tasks } = await q('SELECT * FROM tasks WHERE lead_id=$1 AND user_id=$2 ORDER BY done ASC, due_at ASC NULLS LAST, created_at DESC', [req.params.id, uid]);
@@ -674,7 +674,7 @@ leadsRouter.post('/:id/suggest-replies', async (req, res, next) => {
     const { rows: convo } = await q(
       `SELECT direction, body FROM (
          SELECT direction, body, created_at FROM messages
-         WHERE lead_id = $1 AND user_id = $2 AND body IS NOT NULL AND btrim(body) <> ''
+         WHERE lead_id = $1 AND user_id = $2 AND deleted_at IS NULL AND body IS NOT NULL AND btrim(body) <> ''
          ORDER BY created_at DESC LIMIT 60
        ) t ORDER BY created_at ASC`,
       [req.params.id, uid]
@@ -686,7 +686,7 @@ leadsRouter.post('/:id/suggest-replies', async (req, res, next) => {
     const { rows: others } = await q(
       `SELECT m.lead_id, m.direction, m.body, l.campaign_name FROM (
          SELECT lead_id, direction, body, created_at FROM messages
-         WHERE user_id = $1 AND lead_id <> $2 AND body IS NOT NULL AND btrim(body) <> ''
+         WHERE user_id = $1 AND lead_id <> $2 AND deleted_at IS NULL AND body IS NOT NULL AND btrim(body) <> ''
          ORDER BY created_at DESC LIMIT 800
        ) m JOIN leads l ON l.id = m.lead_id
        ORDER BY m.lead_id ASC, m.created_at ASC`,
@@ -737,9 +737,9 @@ leadsRouter.post('/:id/wa/load-earlier', async (req, res, next) => {
     const dir = req.query.mode === 'back' ? 'ASC' : 'DESC';
     const { rows: anchorRows } = await q(
       `SELECT wa_message_id, direction, created_at,
-              (SELECT count(*)::int FROM messages WHERE lead_id=$1 AND user_id=$2) AS total
+              (SELECT count(*)::int FROM messages WHERE lead_id=$1 AND user_id=$2 AND deleted_at IS NULL) AS total
        FROM messages
-       WHERE lead_id=$1 AND user_id=$2 AND channel='whatsapp' AND wa_message_id IS NOT NULL
+       WHERE lead_id=$1 AND user_id=$2 AND channel='whatsapp' AND wa_message_id IS NOT NULL AND deleted_at IS NULL
        ORDER BY created_at ${dir} LIMIT 1`,
       [req.params.id, uid]
     );
@@ -1036,10 +1036,24 @@ leadsRouter.delete('/:leadId/remarks/:remarkId', async (req, res, next) => {
 leadsRouter.post('/:id/messages', async (req, res, next) => {
   try {
     const uid = req.user.id;
-    const { body, mediaData, mediaMime, fileName } = req.body || {};
+    const { body, mediaData, mediaMime, fileName, replyToId, voice } = req.body || {};
     if (!body && !mediaData) return res.status(400).json({ error: 'Empty message.' });
     const { rows: lead } = await q('SELECT * FROM leads WHERE id=$1 AND user_id=$2', [req.params.id, uid]);
     if (!lead.length) return res.status(404).json({ error: 'Lead not found.' });
+
+    // A reply-to quote: look up the message it targets so we can pass the
+    // real WhatsApp id (Baileys/Cloud both address a quote by message id, not
+    // by our own row id) and, for Baileys, a text stand-in for its content.
+    let quoted;
+    if (replyToId) {
+      const { rows: qrows } = await q(
+        'SELECT wa_message_id, body, direction FROM messages WHERE id=$1 AND lead_id=$2 AND user_id=$3 AND deleted_at IS NULL',
+        [replyToId, req.params.id, uid]
+      );
+      if (qrows.length && qrows[0].wa_message_id) {
+        quoted = { id: qrows[0].wa_message_id, body: qrows[0].body, fromMe: qrows[0].direction === 'out' };
+      }
+    }
 
     const phone = lead[0].phone;
     const wa = await loadWaConnection(uid);
@@ -1053,13 +1067,13 @@ leadsRouter.post('/:id/messages', async (req, res, next) => {
     // tried first when configured, but a failure there (e.g. an unverified
     // number or a stale token) falls back to the paired WhatsApp Web device
     // instead of being silently swallowed.
-    const opts = { mediaData, mimeType: mediaMime, caption: body || undefined, fileName };
+    const opts = { mediaData, mimeType: mediaMime, caption: body || undefined, fileName, voice, quoted };
     const transports = [];
     if (haveCloud) {
-      transports.push(['Cloud API', () => (mediaData ? sendMedia(wa.cloud, phone, opts) : sendText(wa.cloud, phone, body))]);
+      transports.push(['Cloud API', () => (mediaData ? sendMedia(wa.cloud, phone, opts) : sendText(wa.cloud, phone, body, { quoted }))]);
     }
     if (haveWeb) {
-      transports.push(['WhatsApp Web', () => (mediaData ? sendWebMedia(uid, phone, opts) : sendWebText(uid, phone, body))]);
+      transports.push(['WhatsApp Web', () => (mediaData ? sendWebMedia(uid, phone, opts) : sendWebText(uid, phone, body, { quoted }))]);
     }
 
     let waMessageId = null;
@@ -1080,13 +1094,130 @@ leadsRouter.post('/:id/messages', async (req, res, next) => {
       return res.status(502).json({ error: `Could not send on WhatsApp. ${failures.join(' ')}`.trim() });
     }
 
+    const meta = quoted ? { reply_to: { body: quoted.body || '(message)' } } : null;
     const { rows } = await q(
-      'INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, media_data, media_mime, user_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-      [req.params.id, 'out', 'whatsapp', body || null, waMessageId, mediaData || null, mediaMime || null, uid]
+      'INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, media_data, media_mime, meta, user_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+      [req.params.id, 'out', 'whatsapp', body || null, waMessageId, mediaData || null, mediaMime || null, meta ? JSON.stringify(meta) : null, uid]
     );
     await q('UPDATE leads SET last_contacted_at = now(), updated_at = now() WHERE id = $1', [req.params.id]);
 
     res.json({ ...rows[0], sent_via: sentVia });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** React to (or, with emoji: '', un-react from) a message — tries whichever
+ *  transport is connected, Cloud API first when both are available. */
+leadsRouter.post('/:id/messages/:mid/react', async (req, res, next) => {
+  try {
+    const uid = req.user.id;
+    const emoji = String(req.body?.emoji ?? '');
+
+    const { rows } = await q(
+      `SELECT m.*, l.phone FROM messages m
+       JOIN leads l ON l.id = m.lead_id AND l.user_id = m.user_id
+       WHERE m.id = $1 AND m.lead_id = $2 AND m.user_id = $3 AND m.deleted_at IS NULL`,
+      [req.params.mid, req.params.id, uid]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Message not found.' });
+    const msg = rows[0];
+    if (!msg.wa_message_id) return res.status(400).json({ error: 'This message has no WhatsApp id to react to.' });
+
+    const wa = await loadWaConnection(uid);
+    const haveCloud = cloudConfigured(wa.cloud) && String(msg.wa_message_id).startsWith('wamid.');
+    const haveWeb = webStatus(uid).status === 'connected' && !String(msg.wa_message_id).startsWith('wamid.');
+    if (!haveCloud && !haveWeb) {
+      return res.status(409).json({ error: 'The device this message went out on is not connected.' });
+    }
+
+    try {
+      if (haveCloud) await sendReaction(wa.cloud, msg.phone, { targetId: msg.wa_message_id, emoji });
+      else await sendWebReaction(uid, msg.phone, { targetId: msg.wa_message_id, targetFromMe: msg.direction === 'out', emoji });
+    } catch (e) {
+      return res.status(502).json({ error: `WhatsApp reaction failed: ${e.message}` });
+    }
+
+    const nextMeta = { ...(msg.meta || {}) };
+    if (emoji) nextMeta.reaction_mine = emoji; else delete nextMeta.reaction_mine;
+    const { rows: updated } = await q(
+      'UPDATE messages SET meta = $1 WHERE id = $2 RETURNING *',
+      [Object.keys(nextMeta).length ? JSON.stringify(nextMeta) : null, msg.id]
+    );
+    res.json(updated[0]);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Star/unstar a message — an Ads Desk-only bookmark, not synced with the phone. */
+leadsRouter.patch('/:id/messages/:mid/star', async (req, res, next) => {
+  try {
+    const uid = req.user.id;
+    const starred = !!req.body?.starred;
+    const { rows } = await q(
+      'UPDATE messages SET starred = $1 WHERE id = $2 AND lead_id = $3 AND user_id = $4 RETURNING *',
+      [starred, req.params.mid, req.params.id, uid]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Message not found.' });
+    res.json(rows[0]);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Delete one message from a lead's conversation.
+ *   ?revoke=1  → "Delete for everyone": ask WhatsApp to revoke it on both
+ *                phones first, then drop our copy. Only possible for messages
+ *                we sent through the paired WhatsApp Web device — the Cloud API
+ *                has no delete endpoint at all, and WhatsApp itself only honours
+ *                a revoke for a couple of days after sending.
+ *   (default)  → "Delete for me": removes it from Ads Desk only; the phones keep it.
+ */
+leadsRouter.delete('/:id/messages/:mid', async (req, res, next) => {
+  try {
+    const uid = req.user.id;
+    const revoke = ['1', 'true', 'yes'].includes(String(req.query.revoke || '').toLowerCase());
+
+    const { rows } = await q(
+      `SELECT m.*, l.phone FROM messages m
+       JOIN leads l ON l.id = m.lead_id AND l.user_id = m.user_id
+       WHERE m.id = $1 AND m.lead_id = $2 AND m.user_id = $3`,
+      [req.params.mid, req.params.id, uid]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Message not found.' });
+    const msg = rows[0];
+
+    let revoked = false;
+    if (revoke) {
+      if (msg.direction !== 'out') {
+        return res.status(400).json({ error: 'WhatsApp only lets you delete your own messages for everyone.' });
+      }
+      if (!msg.wa_message_id) {
+        return res.status(400).json({ error: 'This message has no WhatsApp id, so it can only be deleted here.' });
+      }
+      // Cloud API message ids ("wamid.…") mean the message went out through the
+      // Cloud API, which has no delete endpoint — revoking it over the paired
+      // device would silently do nothing, so say so instead.
+      if (String(msg.wa_message_id).startsWith('wamid.')) {
+        return res.status(400).json({ error: 'This message was sent through the WhatsApp Cloud API, which cannot delete messages. You can still delete it here.' });
+      }
+      if (webStatus(uid).status !== 'connected') {
+        return res.status(409).json({ error: 'Delete for everyone needs the paired WhatsApp device to be connected.' });
+      }
+      try {
+        await revokeWebMessage(uid, msg.phone, { id: msg.wa_message_id, fromMe: true });
+        revoked = true;
+      } catch (e) {
+        return res.status(502).json({ error: `WhatsApp refused the delete: ${e.message}` });
+      }
+    }
+
+    // Tombstone, not a hard delete — a later "Sync this chat" would otherwise
+    // pull the very same message straight back in.
+    await q('UPDATE messages SET deleted_at = now() WHERE id = $1 AND user_id = $2', [msg.id, uid]);
+    res.json({ ok: true, revoked });
   } catch (e) {
     next(e);
   }

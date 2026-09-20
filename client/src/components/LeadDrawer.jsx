@@ -5,6 +5,19 @@ import MessageTemplates from './MessageTemplates.jsx';
 
 const TASK_KINDS = ['todo', 'call', 'meeting', 'whatsapp', 'email'];
 
+// A small everyday set for the composer — enough to answer a lead without
+// pulling in an emoji-picker dependency.
+const EMOJIS = [
+  '😀', '😊', '😍', '🥰', '😉', '😎', '🤗', '🤝', '🙏', '👍',
+  '👋', '👌', '💪', '🙌', '👏', '✅', '❌', '⭐', '✨', '🔥',
+  '💯', '❤️', '💖', '🎉', '🎁', '💐', '💄', '💅', '💇', '💆',
+  '📅', '⏰', '📍', '📞', '📷', '💰', '💵', '🧾', '📝', '📌',
+  '😂', '😅', '😇', '🤔', '😢', '😔', '🙈', '👀', '☺️', '🫶'
+];
+
+// The row WhatsApp shows on a long-press, before "more" opens the full picker.
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
 /** Turn a Meta lead-form field key ("what's_your_budget?") into a label. */
 function humanizeFieldKey(k) {
   return String(k).replace(/[_?]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/^./, (c) => c.toUpperCase());
@@ -38,21 +51,57 @@ function FormAnswersCard({ fields }) {
   );
 }
 
-const URL_RE = /(https?:\/\/[^\s]+)/g;
+// WhatsApp's own markup, in the order WhatsApp itself resolves it: links first
+// (so a URL containing _ or * stays intact), then ```block```, `mono`, *bold*,
+// _italic_, ~strike~. A marker only counts when it wraps non-space, exactly as
+// on the phone — "2 * 3 * 4" stays plain text.
+const WA_TOKEN_RE =
+  /(https?:\/\/[^\s]+|www\.[^\s]+|```[\s\S]+?```|`[^`\n]+`|\*(?=\S)[^*\n]*?\S\*|_(?=\S)[^_\n]*?\S_|~(?=\S)[^~\n]*?\S~)/;
 
-/** Renders text with any http(s) URLs turned into clickable links. */
-function Linkified({ text }) {
+/** Trailing sentence punctuation isn't part of the link people meant to send. */
+function splitTrailingPunctuation(url) {
+  const m = /[.,!?;:)\]}]+$/.exec(url);
+  return m ? [url.slice(0, -m[0].length), m[0]] : [url, ''];
+}
+
+/** WhatsApp-formatted message text: markup rendered, URLs clickable, newlines kept. */
+function richNodes(text, keyBase = 'r') {
+  const out = [];
+  let rest = String(text ?? '');
+  let i = 0;
+  while (rest) {
+    const m = WA_TOKEN_RE.exec(rest);
+    if (!m) { out.push(rest); break; }
+    if (m.index > 0) out.push(rest.slice(0, m.index));
+    const tok = m[0];
+    const key = `${keyBase}-${i++}`;
+    if (tok.startsWith('```')) {
+      out.push(<code key={key} className="wa-code block">{tok.slice(3, -3)}</code>);
+    } else if (tok.startsWith('`')) {
+      out.push(<code key={key} className="wa-code">{tok.slice(1, -1)}</code>);
+    } else if (tok.startsWith('*')) {
+      out.push(<strong key={key}>{richNodes(tok.slice(1, -1), key)}</strong>);
+    } else if (tok.startsWith('_')) {
+      out.push(<em key={key}>{richNodes(tok.slice(1, -1), key)}</em>);
+    } else if (tok.startsWith('~')) {
+      out.push(<s key={key}>{richNodes(tok.slice(1, -1), key)}</s>);
+    } else {
+      const [url, tail] = splitTrailingPunctuation(tok);
+      out.push(
+        <a key={key} href={url.startsWith('www.') ? `https://${url}` : url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+          {url}
+        </a>
+      );
+      if (tail) out.push(tail);
+    }
+    rest = rest.slice(m.index + tok.length);
+  }
+  return out;
+}
+
+function RichText({ text }) {
   if (!text) return null;
-  const parts = String(text).split(URL_RE);
-  return parts.map((part, i) =>
-    URL_RE.test(part) ? (
-      <a key={i} href={part} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
-        {part}
-      </a>
-    ) : (
-      <span key={i}>{part}</span>
-    )
-  );
+  return <span className="wa-text">{richNodes(text)}</span>;
 }
 
 function MessageMedia({ mime, data }) {
@@ -71,6 +120,30 @@ function Ticks({ status }) {
   if (status === 'read') return <span className="wa-tick read">✓✓</span>;
   if (status === 'delivered') return <span className="wa-tick">✓✓</span>;
   return <span className="wa-tick">✓</span>;
+}
+
+/** The little emoji pill WhatsApp overlaps on a bubble's corner once someone
+ *  reacts. Shows both sides' reactions when they picked different emoji. */
+function ReactionBadge({ meta }) {
+  const mine = meta?.reaction_mine;
+  const theirs = meta?.reaction_theirs;
+  if (!mine && !theirs) return null;
+  return (
+    <span className="wa-reaction">
+      {theirs}{mine && mine !== theirs ? mine : ''}
+    </span>
+  );
+}
+
+// WhatsApp only honours "delete for everyone" on your own messages, and only
+// for about two and a half days — and never for anything sent through the Cloud
+// API, which has no delete endpoint. Outside that, only "delete for me" is real.
+const REVOKE_WINDOW_MS = 2.5 * 24 * 60 * 60 * 1000;
+
+function canRevoke(m) {
+  if (m.direction !== 'out' || !m.wa_message_id) return false;
+  if (String(m.wa_message_id).startsWith('wamid.')) return false;
+  return Date.now() - new Date(m.created_at).getTime() < REVOKE_WINDOW_MS;
 }
 
 function dayLabel(iso) {
@@ -117,8 +190,25 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   const [copiedPhone, setCopiedPhone] = useState(false);
   const [tagDraft, setTagDraft] = useState('');
   const [taskDraft, setTaskDraft] = useState({ kind: 'todo', title: '', due_at: '' });
+  const [menuFor, setMenuFor] = useState(null);   // message id whose ⌄ menu is open
+  const [deletingId, setDeletingId] = useState(null);
+  const [showEmoji, setShowEmoji] = useState(false);
+  const [replyTarget, setReplyTarget] = useState(null); // message being quoted, or null
+  const [reactingId, setReactingId] = useState(null);
+  const [notice, setNotice] = useState('');
+  const [forwardTarget, setForwardTarget] = useState(null); // message being forwarded, or null
+  const [forwardQuery, setForwardQuery] = useState('');
+  const [forwardResults, setForwardResults] = useState([]);
+  const [forwardSearching, setForwardSearching] = useState(false);
+  const [forwardingTo, setForwardingTo] = useState(null);
+  const [recording, setRecording] = useState(false);
+  const [recordSecs, setRecordSecs] = useState(0);
   const endRef = useRef(null);
   const fileRef = useRef(null);
+  const composerRef = useRef(null);
+  const recorderRef = useRef(null);
+  const recordChunksRef = useRef([]);
+  const recordTimerRef = useRef(null);
 
   const load = useCallback(async () => {
     setData(await api.get(`/leads/${leadId}`));
@@ -150,10 +240,63 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   }, [data?.lead?.id]);
 
   useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && onClose();
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      // Escape closes whatever is on top: the forward modal, a message menu,
+      // the emoji panel, then the drawer.
+      if (forwardTarget) setForwardTarget(null);
+      else if (menuFor !== null) setMenuFor(null);
+      else if (showEmoji) setShowEmoji(false);
+      else onClose();
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, menuFor, showEmoji, forwardTarget]);
+
+  // Any click outside a bubble menu / the emoji panel dismisses them.
+  useEffect(() => {
+    if (menuFor === null && !showEmoji) return undefined;
+    const onDown = (e) => {
+      if (e.target.closest?.('.wa-msg-menu, .wa-msg-caret, .wa-emoji-panel, .wa-emoji-btn')) return;
+      setMenuFor(null);
+      setShowEmoji(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    return () => window.removeEventListener('mousedown', onDown);
+  }, [menuFor, showEmoji]);
+
+  // Grow the composer with the text, the way the phone does, up to ~6 lines.
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
+  }, [draft, view]);
+
+  // A one-line success confirmation (e.g. "Forwarded") that clears itself.
+  useEffect(() => {
+    if (!notice) return undefined;
+    const t = setTimeout(() => setNotice(''), 3000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  // Quoting/forwarding/recording belong to one lead's chat — reset them when
+  // switching leads. The drawer doesn't remount between leads (same leadId
+  // prop, new value), so a recording left running has to be torn down by hand.
+  useEffect(() => {
+    setReplyTarget(null);
+    setForwardTarget(null);
+    setRecording(false);
+    return () => {
+      clearInterval(recordTimerRef.current);
+      const rec = recorderRef.current;
+      if (rec) {
+        try { rec.stop(); } catch { /* already stopped */ }
+        rec.stream?.getTracks().forEach((t) => t.stop());
+        recorderRef.current = null;
+      }
+    };
+  }, [leadId]);
 
   if (!data) return null;
   const { lead, messages, remarks, activity, tasks = [] } = data;
@@ -191,25 +334,28 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
     if (!draft.trim() && attachments.length === 0) return;
     setSending(true);
     setError('');
+    const replyToId = replyTarget?.id;
     try {
       if (attachments.length === 0) {
-        await api.post(`/leads/${leadId}/messages`, { body: draft.trim() || undefined });
+        await api.post(`/leads/${leadId}/messages`, { body: draft.trim() || undefined, replyToId });
       } else {
-        // One WhatsApp message per file; the typed text rides along as the
-        // caption on the first one.
+        // One WhatsApp message per file; the typed text — and the quote, if
+        // any — rides along on the first one.
         for (let i = 0; i < attachments.length; i++) {
           const a = attachments[i];
           await api.post(`/leads/${leadId}/messages`, {
             body: i === 0 && draft.trim() ? draft.trim() : undefined,
             mediaData: a.dataUrl,
             mediaMime: a.mime,
-            fileName: a.name
+            fileName: a.name,
+            replyToId: i === 0 ? replyToId : undefined
           });
         }
       }
       setDraft('');
       setAttachments([]);
       setSuggestions([]);
+      setReplyTarget(null);
       if (fileRef.current) fileRef.current.value = '';
       await load();
     } catch (e) {
@@ -217,6 +363,185 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
     } finally {
       setSending(false);
     }
+  }
+
+  function startReply(m) {
+    setMenuFor(null);
+    setReplyTarget(m);
+    composerRef.current?.focus();
+  }
+
+  /** Tap-to-react — sending the same emoji again removes it, like the phone. */
+  async function reactToMessage(m, emoji) {
+    setMenuFor(null);
+    const next = m.meta?.reaction_mine === emoji ? '' : emoji;
+    setReactingId(m.id);
+    setError('');
+    try {
+      await api.post(`/leads/${leadId}/messages/${m.id}/react`, { emoji: next });
+      await load();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setReactingId(null);
+    }
+  }
+
+  async function toggleStar(m) {
+    setMenuFor(null);
+    try {
+      await api.patch(`/leads/${leadId}/messages/${m.id}/star`, { starred: !m.starred });
+      await load();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  function openForward(m) {
+    setMenuFor(null);
+    setForwardTarget(m);
+    setForwardQuery('');
+    setForwardResults([]);
+  }
+
+  async function searchForwardTargets(text) {
+    setForwardQuery(text);
+    if (!text.trim()) { setForwardResults([]); return; }
+    setForwardSearching(true);
+    try {
+      const r = await api.get(`/leads/list?q=${encodeURIComponent(text.trim())}&pageSize=8`);
+      setForwardResults((r.rows || []).filter((l) => l.id !== lead.id));
+    } catch {
+      setForwardResults([]);
+    } finally {
+      setForwardSearching(false);
+    }
+  }
+
+  async function forwardTo(targetLead) {
+    if (!forwardTarget) return;
+    setForwardingTo(targetLead.id);
+    setError('');
+    try {
+      await api.post(`/leads/${targetLead.id}/messages`, {
+        body: forwardTarget.body || undefined,
+        mediaData: forwardTarget.media_data || undefined,
+        mediaMime: forwardTarget.media_mime || undefined
+      });
+      setNotice(`Forwarded to ${targetLead.full_name || targetLead.phone}.`);
+      setForwardTarget(null);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setForwardingTo(null);
+    }
+  }
+
+  /** Hold-to-record a voice note, sent as WhatsApp's own "voice message"
+   *  (ptt) once released — same as tapping the phone's mic. */
+  async function startRecording() {
+    if (recording) return;
+    setError('');
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      setError('Voice recording is not supported in this browser.');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = ['audio/ogg;codecs=opus', 'audio/webm;codecs=opus', 'audio/webm']
+        .find((t) => window.MediaRecorder?.isTypeSupported?.(t)) || '';
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      recordChunksRef.current = [];
+      rec.ondataavailable = (e) => { if (e.data.size) recordChunksRef.current.push(e.data); };
+      rec.start();
+      recorderRef.current = rec;
+      setRecording(true);
+      setRecordSecs(0);
+      recordTimerRef.current = setInterval(() => setRecordSecs((s) => s + 1), 1000);
+    } catch {
+      setError('Could not access the microphone — check your browser permissions.');
+    }
+  }
+
+  function stopRecording(send_) {
+    const rec = recorderRef.current;
+    if (!rec) return;
+    clearInterval(recordTimerRef.current);
+    rec.onstop = async () => {
+      rec.stream.getTracks().forEach((t) => t.stop());
+      recorderRef.current = null;
+      setRecording(false);
+      if (!send_ || recordChunksRef.current.length === 0) return;
+      const blob = new Blob(recordChunksRef.current, { type: rec.mimeType || 'audio/webm' });
+      const reader = new FileReader();
+      reader.onload = async () => {
+        setSending(true);
+        setError('');
+        try {
+          await api.post(`/leads/${leadId}/messages`, {
+            mediaData: reader.result,
+            mediaMime: rec.mimeType || 'audio/webm',
+            fileName: 'voice-message',
+            voice: true,
+            replyToId: replyTarget?.id
+          });
+          setReplyTarget(null);
+          await load();
+        } catch (e) {
+          setError(e.message);
+        } finally {
+          setSending(false);
+        }
+      };
+      reader.readAsDataURL(blob);
+    };
+    rec.stop();
+  }
+
+  /** Drop a message: from Ads Desk only, or from both phones via WhatsApp. */
+  async function deleteMessage(m, forEveryone) {
+    setMenuFor(null);
+    if (forEveryone && !window.confirm('Delete this message for everyone? It disappears from the lead’s phone too.')) return;
+    setDeletingId(m.id);
+    setError('');
+    try {
+      await api.del(`/leads/${leadId}/messages/${m.id}${forEveryone ? '?revoke=1' : ''}`);
+      await load();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  async function copyMessage(m) {
+    setMenuFor(null);
+    try {
+      await navigator.clipboard.writeText(m.body || '');
+    } catch {
+      setError('Could not copy — your browser blocked clipboard access.');
+    }
+  }
+
+  /** Insert text where the cursor is, like typing it, and keep focus there. */
+  function insertInDraft(text) {
+    const el = composerRef.current;
+    if (!el) { setDraft((d) => d + text); return; }
+    const start = el.selectionStart ?? draft.length;
+    const end = el.selectionEnd ?? draft.length;
+    const next = draft.slice(0, start) + text + draft.slice(end);
+    setDraft(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(start + text.length, start + text.length);
+    });
+  }
+
+  // Enter sends, Shift+Enter (or Ctrl/Alt+Enter) starts a new line — phone behaviour.
+  function onComposerKey(e) {
+    if (e.key !== 'Enter' || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
+    e.preventDefault();
+    send();
   }
 
   async function suggestAI() {
@@ -542,6 +867,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
 
         <div className={`drawer-body ${view === 'chat' ? 'wa-chat' : ''}`}>
           {error && <div className="notice bad">{error}</div>}
+          {notice && <div className="notice good">{notice}</div>}
 
           {view === 'chat' && (
             <>
@@ -566,13 +892,45 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
                   return (
                     <div key={m.id}>
                       {showDay && <div className="wa-day"><span>{dayLabel(m.created_at)}</span></div>}
-                      <div className={`wa-bubble ${m.direction === 'out' ? 'out' : 'in'}`}>
+                      <div className={`wa-bubble ${m.direction === 'out' ? 'out' : 'in'} ${deletingId === m.id ? 'deleting' : ''} ${reactingId === m.id ? 'reacting' : ''} ${(m.meta?.reaction_mine || m.meta?.reaction_theirs) ? 'has-reaction' : ''}`}>
+                        <button
+                          className="wa-msg-caret"
+                          onClick={() => setMenuFor(menuFor === m.id ? null : m.id)}
+                          aria-label="Message options"
+                          title="Message options"
+                        >
+                          ⌄
+                        </button>
+                        {menuFor === m.id && (
+                          <div className="wa-msg-menu">
+                            <div className="wa-quick-react">
+                              {QUICK_REACTIONS.map((e) => (
+                                <button
+                                  key={e}
+                                  className={m.meta?.reaction_mine === e ? 'on' : ''}
+                                  onClick={() => reactToMessage(m, e)}
+                                  aria-label={`React ${e}`}
+                                >
+                                  {e}
+                                </button>
+                              ))}
+                            </div>
+                            <button onClick={() => startReply(m)}>Reply</button>
+                            <button onClick={() => openForward(m)}>Forward</button>
+                            <button onClick={() => toggleStar(m)}>{m.starred ? 'Unstar' : 'Star'}</button>
+                            {m.body && <button onClick={() => copyMessage(m)}>Copy text</button>}
+                            <button onClick={() => deleteMessage(m, false)}>Delete for me</button>
+                            {canRevoke(m) && (
+                              <button className="danger" onClick={() => deleteMessage(m, true)}>Delete for everyone</button>
+                            )}
+                          </div>
+                        )}
                         {m.meta?.reply_to && (
                           <div className="wa-quote">{m.meta.reply_to.body || '(message)'}</div>
                         )}
                         {m.meta?.ad_reply && <AdCard ad={m.meta.ad_reply} />}
                         <MessageMedia mime={m.media_mime} data={m.media_data} />
-                        {m.body && <Linkified text={m.body} />}
+                        {m.body && <RichText text={m.body} />}
                         {m.meta?.buttons?.length > 0 && (
                           <div className="wa-btns">
                             {m.meta.buttons.map((b, bi) => (
@@ -583,9 +941,11 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
                           </div>
                         )}
                         <span className="wa-meta">
+                          {m.starred && <span title="Starred">⭐</span>}
                           {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           {m.direction === 'out' && <Ticks status={m.status} />}
                         </span>
+                        <ReactionBadge meta={m.meta} />
                       </div>
                     </div>
                   );
@@ -846,39 +1206,114 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
                 ))}
               </div>
             )}
-            <div className="wa-composer">
-              <input ref={fileRef} type="file" multiple style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files)} />
-              <button className="wa-icon-btn" onClick={() => fileRef.current?.click()} aria-label="Attach file" title="Attach file">
-                📎
-              </button>
-              <MessageTemplates
-                lead={lead}
-                onInsert={(text) => setDraft((d) => (d.trim() ? `${d} ${text}` : text))}
-              />
-              <button
-                className="wa-icon-btn"
-                onClick={suggestAI}
-                disabled={suggesting}
-                aria-label="Suggest replies with AI"
-                title="Suggest replies with AI"
-              >
-                {suggesting ? '…' : '✨'}
-              </button>
-              <input
-                className="input"
-                placeholder="Type a message"
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && send()}
-                style={{ flex: 1 }}
-              />
-              <button className="wa-send" onClick={send} disabled={sending || (!draft.trim() && attachments.length === 0)} aria-label="Send">
-                {sending ? '…' : '➤'}
-              </button>
-            </div>
+            {replyTarget && (
+              <div className="wa-reply-preview">
+                <div className="wa-reply-preview-body">
+                  <div className="wa-reply-preview-who">{replyTarget.direction === 'out' ? 'You' : lead.full_name || 'Them'}</div>
+                  <div className="wa-reply-preview-text">{replyTarget.body || (replyTarget.media_mime ? '📎 Attachment' : '(message)')}</div>
+                </div>
+                <button className="btn ghost sm" onClick={() => setReplyTarget(null)} aria-label="Cancel reply">×</button>
+              </div>
+            )}
+            {showEmoji && (
+              <div className="wa-emoji-panel">
+                {EMOJIS.map((e) => (
+                  <button key={e} type="button" onClick={() => insertInDraft(e)} aria-label={`Insert ${e}`}>{e}</button>
+                ))}
+              </div>
+            )}
+            {recording ? (
+              <div className="wa-composer wa-recording">
+                <span className="wa-rec-dot" />
+                <span className="wa-rec-time">{String(Math.floor(recordSecs / 60)).padStart(2, '0')}:{String(recordSecs % 60).padStart(2, '0')}</span>
+                <span style={{ flex: 1, color: 'var(--muted)', fontSize: 12.5 }}>Recording voice message…</span>
+                <button className="btn ghost sm" onClick={() => stopRecording(false)}>Cancel</button>
+                <button className="wa-send" onClick={() => stopRecording(true)} aria-label="Send voice message">➤</button>
+              </div>
+            ) : (
+              <div className="wa-composer">
+                <input ref={fileRef} type="file" multiple style={{ display: 'none' }} onChange={(e) => pickFile(e.target.files)} />
+                <button className="wa-icon-btn wa-emoji-btn" onClick={() => setShowEmoji((v) => !v)} aria-label="Emoji" title="Emoji">
+                  🙂
+                </button>
+                <button className="wa-icon-btn" onClick={() => fileRef.current?.click()} aria-label="Attach file" title="Attach file">
+                  📎
+                </button>
+                <MessageTemplates
+                  lead={lead}
+                  onInsert={(text) => insertInDraft(draft && !/\s$/.test(draft) ? ` ${text}` : text)}
+                />
+                <button
+                  className="wa-icon-btn"
+                  onClick={suggestAI}
+                  disabled={suggesting}
+                  aria-label="Suggest replies with AI"
+                  title="Suggest replies with AI"
+                >
+                  {suggesting ? '…' : '✨'}
+                </button>
+                <textarea
+                  ref={composerRef}
+                  className="input wa-input"
+                  rows={1}
+                  placeholder="Type a message — Shift+Enter for a new line"
+                  title="*bold*  _italic_  ~strikethrough~  ```monospace```"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={onComposerKey}
+                  style={{ flex: 1 }}
+                />
+                {!draft.trim() && attachments.length === 0 ? (
+                  <button className="wa-icon-btn wa-mic-btn" onClick={startRecording} disabled={sending} aria-label="Record voice message" title="Record voice message">
+                    🎤
+                  </button>
+                ) : (
+                  <button className="wa-send" onClick={send} disabled={sending} aria-label="Send">
+                    {sending ? '…' : '➤'}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
       </aside>
+
+      {forwardTarget && (
+        <>
+          <div className="scrim" onClick={() => setForwardTarget(null)} />
+          <div style={{ position: 'fixed', inset: 0, zIndex: 42, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+            <div className="card" role="dialog" aria-label="Forward message" style={{ width: '100%', maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
+              <h2 style={{ marginTop: 0 }}>Forward message</h2>
+              <div className="wa-forward-preview">
+                {forwardTarget.body || (forwardTarget.media_mime ? '📎 Attachment' : '(message)')}
+              </div>
+              <input
+                className="input"
+                placeholder="Search leads by name or phone…"
+                value={forwardQuery}
+                onChange={(e) => searchForwardTargets(e.target.value)}
+                autoFocus
+                style={{ marginTop: 10 }}
+              />
+              <div className="wa-forward-results">
+                {forwardSearching && <div className="empty" style={{ padding: 12 }}>Searching…</div>}
+                {!forwardSearching && forwardQuery.trim() && forwardResults.length === 0 && (
+                  <div className="empty" style={{ padding: 12 }}>No leads match.</div>
+                )}
+                {forwardResults.map((l) => (
+                  <button key={l.id} className="wa-forward-row" onClick={() => forwardTo(l)} disabled={forwardingTo === l.id}>
+                    <span>{l.full_name || 'Unnamed lead'}</span>
+                    <span className="t">{forwardingTo === l.id ? 'Sending…' : l.phone}</span>
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                <button className="btn ghost sm" onClick={() => setForwardTarget(null)}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 }

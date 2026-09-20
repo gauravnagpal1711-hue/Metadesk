@@ -223,6 +223,26 @@ async function extractMessage(m) {
   if (!from) return null;
   if (Object.keys(m.message || {}).length === 0) return null; // undecryptable / no content
 
+  // "Delete for everyone" (from either side) arrives as a protocol message
+  // pointing at the original message id — mirror the deletion instead of
+  // storing anything. proto.Message.ProtocolMessage.Type.REVOKE === 0.
+  const proto = unwrapMessage(m.message || {}).protocolMessage;
+  if (proto?.key?.id && (proto.type === 0 || proto.type === 'REVOKE')) {
+    return { from, revoke_id: proto.key.id, fromMe: !!m.key.fromMe, ts: new Date(Number(m.messageTimestamp) * 1000) };
+  }
+
+  // A tap-to-react (or removing one — empty text) on an earlier message. It
+  // targets that message by id, not a new bubble of its own.
+  const reaction = unwrapMessage(m.message || {}).reactionMessage;
+  if (reaction?.key?.id) {
+    return {
+      from,
+      reaction: { targetId: reaction.key.id, targetFromMe: !!reaction.key.fromMe, emoji: reaction.text || '' },
+      fromMe: !!m.key.fromMe,
+      ts: new Date(Number(m.messageTimestamp) * 1000)
+    };
+  }
+
   const desc = describeMessage(m.message || {});
   if (desc.subtype === 'system') return null; // protocol/system chatter, never shown
   const media = await extractMedia(m.message || {}, m);
@@ -417,15 +437,26 @@ export async function syncPhoneQuickReplies(userId) {
   return { requested: true };
 }
 
-export async function sendWebText(userId, phone, body) {
+/** Build the minimal WAMessage Baileys needs to render a quoted-reply preview.
+ *  We only keep a message's text locally, not its original proto, so a quote
+ *  of a media message loses the thumbnail but still shows the right context. */
+function quotedStub(jid, quoted) {
+  if (!quoted?.id) return undefined;
+  return {
+    key: { remoteJid: jid, id: quoted.id, fromMe: !!quoted.fromMe },
+    message: { conversation: quoted.body || '' }
+  };
+}
+
+export async function sendWebText(userId, phone, body, { quoted } = {}) {
   const s = sessions.get(userId);
   if (!s || s.status !== 'connected' || !s.sock) throw new Error('WhatsApp Web is not connected.');
   const jid = `${String(phone).replace(/\D/g, '')}@s.whatsapp.net`;
-  const sent = await s.sock.sendMessage(jid, { text: body });
+  const sent = await s.sock.sendMessage(jid, { text: body }, { quoted: quotedStub(jid, quoted) });
   return { id: sent?.key?.id };
 }
 
-export async function sendWebMedia(userId, phone, { mediaData, mimeType, caption, fileName }) {
+export async function sendWebMedia(userId, phone, { mediaData, mimeType, caption, fileName, voice, quoted }) {
   const s = sessions.get(userId);
   if (!s || s.status !== 'connected' || !s.sock) throw new Error('WhatsApp Web is not connected.');
   const jid = `${String(phone).replace(/\D/g, '')}@s.whatsapp.net`;
@@ -437,11 +468,36 @@ export async function sendWebMedia(userId, phone, { mediaData, mimeType, caption
   let payload;
   if (mimetype.startsWith('image/')) payload = { image: buffer, caption, mimetype };
   else if (mimetype.startsWith('video/')) payload = { video: buffer, caption, mimetype };
-  else if (mimetype.startsWith('audio/')) payload = { audio: buffer, mimetype };
+  else if (mimetype.startsWith('audio/')) payload = { audio: buffer, mimetype, ptt: !!voice };
   else payload = { document: buffer, mimetype, fileName: fileName || 'file', caption };
 
-  const sent = await s.sock.sendMessage(jid, payload);
+  const sent = await s.sock.sendMessage(jid, payload, { quoted: quotedStub(jid, quoted) });
   return { id: sent?.key?.id };
+}
+
+/** Tap-to-react (or, with emoji: '', remove our reaction) on an earlier message. */
+export async function sendWebReaction(userId, phone, { targetId, targetFromMe, emoji }) {
+  const s = sessions.get(userId);
+  if (!s || s.status !== 'connected' || !s.sock) throw new Error('WhatsApp Web is not connected.');
+  if (!targetId) throw new Error('No WhatsApp message id to react to.');
+  const jid = `${String(phone).replace(/\D/g, '')}@s.whatsapp.net`;
+  await s.sock.sendMessage(jid, { react: { text: emoji || '', key: { remoteJid: jid, id: targetId, fromMe: !!targetFromMe } } });
+  return { ok: true };
+}
+
+/**
+ * "Delete for everyone" — ask WhatsApp to revoke a message we already sent.
+ * WhatsApp only honours this for our own messages and only inside its own time
+ * window (a couple of days); outside it the phone silently keeps the message,
+ * so the caller should treat success here as best-effort.
+ */
+export async function revokeWebMessage(userId, phone, { id, fromMe = true }) {
+  const s = sessions.get(userId);
+  if (!s || s.status !== 'connected' || !s.sock) throw new Error('WhatsApp Web is not connected.');
+  if (!id) throw new Error('No WhatsApp message id to delete.');
+  const jid = `${String(phone).replace(/\D/g, '')}@s.whatsapp.net`;
+  await s.sock.sendMessage(jid, { delete: { remoteJid: jid, id, fromMe: !!fromMe } });
+  return { ok: true };
 }
 
 /** Clear one user's credential files without removing the dir (Railway volume). */

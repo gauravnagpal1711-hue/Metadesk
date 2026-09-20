@@ -34,7 +34,7 @@ export async function getPhoneNumberInfo(cfg) {
   };
 }
 
-export async function sendText(cfg, to, body) {
+export async function sendText(cfg, to, body, { quoted } = {}) {
   if (!cloudConfigured(cfg)) throw new Error('WhatsApp Cloud API is not connected.');
   const res = await fetch(`https://graph.facebook.com/${VERSION}/${cfg.phoneNumberId}/messages`, {
     method: 'POST',
@@ -43,11 +43,31 @@ export async function sendText(cfg, to, body) {
       messaging_product: 'whatsapp',
       to,
       type: 'text',
-      text: { preview_url: true, body }
+      text: { preview_url: true, body },
+      ...(quoted?.id ? { context: { message_id: quoted.id } } : {})
     })
   });
   const json = await res.json();
   if (!res.ok) throw new Error(json?.error?.message || 'WhatsApp send failed.');
+  return { id: json.messages?.[0]?.id };
+}
+
+/** Tap-to-react (or, with emoji: '', remove our reaction) on an earlier message. */
+export async function sendReaction(cfg, to, { targetId, emoji }) {
+  if (!cloudConfigured(cfg)) throw new Error('WhatsApp Cloud API is not connected.');
+  if (!targetId) throw new Error('No WhatsApp message id to react to.');
+  const res = await fetch(`https://graph.facebook.com/${VERSION}/${cfg.phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to,
+      type: 'reaction',
+      reaction: { message_id: targetId, emoji: emoji || '' }
+    })
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json?.error?.message || 'WhatsApp reaction failed.');
   return { id: json.messages?.[0]?.id };
 }
 
@@ -59,7 +79,7 @@ const KIND_BY_MIME = (mime) => {
 };
 
 /** mediaData is a base64 data URL. Uploads to Meta first, then sends by the returned media id. */
-export async function sendMedia(cfg, to, { mediaData, mimeType, caption, fileName }) {
+export async function sendMedia(cfg, to, { mediaData, mimeType, caption, fileName, quoted }) {
   if (!cloudConfigured(cfg)) throw new Error('WhatsApp Cloud API is not connected.');
   const match = /^data:([^;]+);base64,(.*)$/.exec(mediaData || '');
   if (!match) throw new Error('mediaData must be a base64 data URL.');
@@ -84,7 +104,8 @@ export async function sendMedia(cfg, to, { mediaData, mimeType, caption, fileNam
     messaging_product: 'whatsapp',
     to,
     type: kind,
-    [kind]: { id: uploadJson.id, ...(kind === 'document' ? { filename: fileName || 'file', caption } : { caption }) }
+    [kind]: { id: uploadJson.id, ...(kind === 'document' ? { filename: fileName || 'file', caption } : { caption }) },
+    ...(quoted?.id ? { context: { message_id: quoted.id } } : {})
   };
   const sendRes = await fetch(`https://graph.facebook.com/${VERSION}/${cfg.phoneNumberId}/messages`, {
     method: 'POST',
@@ -128,6 +149,20 @@ export function parseWebhook(payload) {
       const contacts = value.contacts || [];
       for (const msg of value.messages || []) {
         const contact = contacts.find((c) => c.wa_id === msg.from);
+
+        // A tap-to-react from the lead's side — targets an earlier message by
+        // id, not a bubble of its own.
+        if (msg.type === 'reaction') {
+          out.push({
+            phone_number_id: phoneNumberId,
+            from: msg.from,
+            reaction: { targetId: msg.reaction?.message_id, targetFromMe: true, emoji: msg.reaction?.emoji || '' },
+            fromMe: false,
+            ts: msg.timestamp ? new Date(Number(msg.timestamp) * 1000) : new Date()
+          });
+          continue;
+        }
+
         const mediaType = MEDIA_TYPES.find((t) => msg[t]);
         const meta = {};
         if (msg.referral) {
@@ -141,6 +176,9 @@ export function parseWebhook(payload) {
           };
         }
         if (mediaType && mediaType !== 'text') meta.subtype = mediaType;
+        // The webhook only gives us the quoted message's id, not its text — the
+        // ingest route resolves it against our own stored copy of that message.
+        if (msg.context?.id) meta.reply_to_id = msg.context.id;
         out.push({
           phone_number_id: phoneNumberId,
           from: msg.from,

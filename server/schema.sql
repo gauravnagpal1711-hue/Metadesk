@@ -146,6 +146,14 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS meta JSONB;
 -- Outbound delivery state from WhatsApp Web's ack events: sent | delivered | read.
 -- Inbound messages stay 'sent' (unused) — only outbound ticks are rendered.
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'sent';
+-- Deleted from the Conversation tab, or revoked ("delete for everyone") on WhatsApp.
+-- Kept as a tombstone instead of being removed so a later history sync doesn't
+-- re-import it: every read path filters deleted_at IS NULL, while the
+-- alreadyStored() de-dupe check deliberately still sees the row.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+-- Starring is an Ads Desk-only bookmark — WhatsApp itself has no API to read or
+-- write a phone's own star state, so this deliberately does not mirror the phone.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS starred BOOLEAN NOT NULL DEFAULT false;
 
 CREATE INDEX IF NOT EXISTS messages_lead_idx ON messages(lead_id, created_at);
 

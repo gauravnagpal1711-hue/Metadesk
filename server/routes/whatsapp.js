@@ -86,6 +86,37 @@ export async function ingestIncoming(userId, m) {
   if (!userId) return null;
   const { name, body, wa_message_id, ts, fromMe, media_data, media_mime, meta } = m;
   const phone = normalisePhone(m.from);
+
+  // "Delete for everyone" done on the phone (or by the lead): drop our copy so
+  // the Conversation tab keeps mirroring what WhatsApp actually shows.
+  if (m.revoke_id) {
+    const { rowCount } = await q(
+      'UPDATE messages SET deleted_at = now() WHERE wa_message_id = $1 AND user_id = $2 AND deleted_at IS NULL',
+      [m.revoke_id, userId]
+    );
+    await q('DELETE FROM pending_messages WHERE wa_message_id = $1 AND user_id = $2', [m.revoke_id, userId]);
+    if (rowCount) console.log(`[WhatsApp u${userId}] Message ${m.revoke_id} deleted for everyone — removed locally`);
+    return null;
+  }
+
+  // A tap-to-react on an earlier message: fold it into that message's own
+  // meta instead of creating a new bubble. Reactions only ever land on a
+  // message we already stored, so this never touches lead creation / the
+  // pending-message queue.
+  if (m.reaction) {
+    const field = fromMe ? 'reaction_mine' : 'reaction_theirs';
+    const { rows: target } = await q(
+      'SELECT id, meta FROM messages WHERE wa_message_id = $1 AND user_id = $2',
+      [m.reaction.targetId, userId]
+    );
+    if (target.length) {
+      const nextMeta = { ...(target[0].meta || {}) };
+      if (m.reaction.emoji) nextMeta[field] = m.reaction.emoji; else delete nextMeta[field];
+      await q('UPDATE messages SET meta = $1 WHERE id = $2', [Object.keys(nextMeta).length ? JSON.stringify(nextMeta) : null, target[0].id]);
+    }
+    return null;
+  }
+
   const { rows } = await q('SELECT * FROM leads WHERE phone = $1 AND user_id = $2 ORDER BY created_at ASC LIMIT 1', [phone, userId]);
   let lead = rows[0];
 
@@ -114,6 +145,19 @@ export async function ingestIncoming(userId, m) {
   }
 
   if (await alreadyStored(userId, wa_message_id)) return lead;
+
+  // The Cloud webhook only gives us the quoted message's id, never its text —
+  // resolve it against our own copy so the reply preview renders the same way
+  // a Baileys-sourced quote already does.
+  if (meta?.reply_to_id) {
+    const { rows: quoted } = await q(
+      'SELECT body FROM messages WHERE wa_message_id = $1 AND lead_id = $2 AND user_id = $3',
+      [meta.reply_to_id, lead.id, userId]
+    );
+    if (quoted.length) meta.reply_to = { body: quoted[0].body || '(message)' };
+    delete meta.reply_to_id;
+  }
+
   await q(
     `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, media_data, media_mime, meta, created_at, user_id)
     VALUES ($1,$2,'whatsapp',$3,$4,$5,$6,$7,$8,$9)`,
@@ -135,6 +179,30 @@ async function ingestHistoryBatch(userId, items) {
   let reconciled = 0;
   for (const item of items) {
     try {
+      // A revoke replayed by the history sync: honour the deletion, never
+      // insert it as a blank message.
+      if (item.revoke_id) {
+        await q(
+          'UPDATE messages SET deleted_at = now() WHERE wa_message_id = $1 AND user_id = $2 AND deleted_at IS NULL',
+          [item.revoke_id, userId]
+        );
+        continue;
+      }
+      // A reaction replayed by the history sync: fold it into the target
+      // message's meta, same as a live one.
+      if (item.reaction) {
+        const field = item.fromMe ? 'reaction_mine' : 'reaction_theirs';
+        const { rows: target } = await q(
+          'SELECT id, meta FROM messages WHERE wa_message_id = $1 AND user_id = $2',
+          [item.reaction.targetId, userId]
+        );
+        if (target.length) {
+          const nextMeta = { ...(target[0].meta || {}) };
+          if (item.reaction.emoji) nextMeta[field] = item.reaction.emoji; else delete nextMeta[field];
+          await q('UPDATE messages SET meta = $1 WHERE id = $2', [Object.keys(nextMeta).length ? JSON.stringify(nextMeta) : null, target[0].id]);
+        }
+        continue;
+      }
       const phone = normalisePhone(item.from);
       const { rows } = await q('SELECT * FROM leads WHERE phone = $1 AND user_id = $2 ORDER BY created_at ASC LIMIT 1', [phone, userId]);
       const lead = rows[0];
