@@ -14,6 +14,7 @@ export default function Connect({ onConnectionChange }) {
   const [error, setError] = useState('');
   const [pairMethod, setPairMethod] = useState('qr'); // 'qr' | 'phone'
   const [phoneInput, setPhoneInput] = useState('');
+  const [username, setUsername] = useState(null);
   const vc = useValidation(); // Cloud API details form
   const poll = useRef(null);
 
@@ -36,6 +37,7 @@ export default function Connect({ onConnectionChange }) {
       setCloud(c);
       setCloudDraft({ phoneNumberId: c.phoneNumberId || '', token: '', verifyToken: c.verifyToken || '' });
     }).catch(() => {});
+    api.get('/auth/me').then((r) => setUsername(r.user?.username || null)).catch(() => {});
     poll.current = setInterval(refresh, 3000);
     return () => clearInterval(poll.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -140,12 +142,18 @@ export default function Connect({ onConnectionChange }) {
   const web = status.web || {};
   const origin = window.location.origin;
   const waStatus = web.status === 'connected' ? 'good' : web.status === 'pairing' ? 'warn' : '';
+  // WhatsApp Web (Baileys) automates the consumer WhatsApp app outside its
+  // official Business Platform, which is against WhatsApp's Business Terms.
+  // Keep it restricted to the account that already relies on it in production
+  // instead of surfacing it to every new tenant (or a Meta App Review tester).
+  const showWebPairing = username === 'owner';
 
   return (
     <>
       {error && <div className="notice bad">{error}</div>}
 
-      <div className="grid2">
+      <div className={showWebPairing ? 'grid2' : ''}>
+        {showWebPairing && (
         <div className="card">
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
             <h2 style={{ margin: 0 }}>Pair WhatsApp Web</h2>
@@ -246,6 +254,7 @@ export default function Connect({ onConnectionChange }) {
             or you will re-link after every deploy.
           </div>
         </div>
+        )}
 
         <div className="card">
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
@@ -255,7 +264,8 @@ export default function Connect({ onConnectionChange }) {
             </span>
           </div>
           <p style={{ color: 'var(--muted)', marginTop: 8, fontSize: 12.5 }}>
-            Alternative to QR pairing — your own WhatsApp Business number via Meta&apos;s Cloud API.
+            {showWebPairing ? 'Alternative to QR pairing — your own ' : 'Connect your own '}
+            WhatsApp Business number via Meta&apos;s Cloud API.
             Enter the credentials from Meta for Developers below; nothing goes in Railway.
           </p>
 
