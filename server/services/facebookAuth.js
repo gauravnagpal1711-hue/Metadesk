@@ -27,7 +27,7 @@ const SCOPES = [
   ].join(',');
 
 export function oauthConfigured() {
-    return Boolean(process.env.FB_APP_ID && process.env.FB_APP_SECRET);
+    return Boolean(process.env.FB_APP_ID && process.env.FB_APP_SECRET && process.env.FB_LOGIN_CONFIG_ID);
 }
 
 function redirectUri() {
@@ -35,13 +35,20 @@ function redirectUri() {
     return `${base}/api/facebook/callback`;
 }
 
-/** URL we send the browser to so the user can approve. `state` guards against CSRF. */
+/** URL we send the browser to so the user can approve. `state` guards against CSRF.
+ *
+ * The Meta app only has the "Facebook Login for Business" product enabled (not
+ * classic Facebook Login), which requires a `config_id` naming a saved Login
+ * Configuration instead of a raw `scope` param — passing `scope` alone gets
+ * rejected with a "Feature Unavailable" screen. The configured permissions must
+ * match SCOPES above (kept for exchangeCode's docs/reference).
+ */
 export function loginUrl(state) {
     const url = new URL(OAUTH);
     url.searchParams.set('client_id', process.env.FB_APP_ID);
     url.searchParams.set('redirect_uri', redirectUri());
     url.searchParams.set('state', state);
-    url.searchParams.set('scope', SCOPES);
+    url.searchParams.set('config_id', process.env.FB_LOGIN_CONFIG_ID);
     url.searchParams.set('response_type', 'code');
     return url.toString();
 }
