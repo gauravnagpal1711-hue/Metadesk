@@ -56,8 +56,8 @@ to create, read, and manage advertising campaigns on the account holder's
 behalf, and never for any other purpose. Access tokens are stored encrypted at
 rest on our servers and are never exposed to the browser or to other account
 holders.</li>
-<li><strong>WhatsApp data</strong> — if an account holder connects a WhatsApp number (via
-Meta's Cloud API or by pairing their own device), we process the messages sent
+<li><strong>WhatsApp data</strong> — if an account holder connects a WhatsApp number to
+Ads Desk, we process the messages sent
 and received through that number so they can be shown in the account holder's
 lead inbox and so automated replies can be suggested.</li>
 <li><strong>Creative content</strong> — images, video, and text an account holder uploads or

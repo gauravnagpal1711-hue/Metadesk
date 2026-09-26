@@ -203,6 +203,11 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   const [forwardingTo, setForwardingTo] = useState(null);
   const [recording, setRecording] = useState(false);
   const [recordSecs, setRecordSecs] = useState(0);
+  // Phone-side chat sync needs WhatsApp Web pairing, which only some accounts have.
+  const [webAllowed, setWebAllowed] = useState(false);
+  useEffect(() => {
+    api.get('/whatsapp/status').then((s) => setWebAllowed(!!s.webAllowed)).catch(() => {});
+  }, []);
   const endRef = useRef(null);
   const fileRef = useRef(null);
   const composerRef = useRef(null);
@@ -874,14 +879,16 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
               {lead.ad_referral && <AdCard ad={lead.ad_referral} />}
               <FormAnswersCard fields={lead.fields} />
 
-              <div style={{ textAlign: 'center', margin: '2px 0 8px', display: 'flex', gap: 6, justifyContent: 'center' }}>
-                <button className="btn ghost sm" onClick={() => loadEarlier()} disabled={loadingEarlier}>
-                  {loadingEarlier ? 'Syncing from phone…' : 'Sync this chat'}
-                </button>
-                <button className="btn ghost sm" onClick={() => loadEarlier('back')} disabled={loadingEarlier}>
-                  Load older
-                </button>
-              </div>
+              {webAllowed && (
+                <div style={{ textAlign: 'center', margin: '2px 0 8px', display: 'flex', gap: 6, justifyContent: 'center' }}>
+                  <button className="btn ghost sm" onClick={() => loadEarlier()} disabled={loadingEarlier}>
+                    {loadingEarlier ? 'Syncing from phone…' : 'Sync this chat'}
+                  </button>
+                  <button className="btn ghost sm" onClick={() => loadEarlier('back')} disabled={loadingEarlier}>
+                    Load older
+                  </button>
+                </div>
+              )}
 
               {messages.length === 0 ? (
                 <div className="empty"><h3>No messages yet</h3>Send the first WhatsApp message below.</div>

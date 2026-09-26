@@ -162,12 +162,19 @@ export default function Flowchart() {
   const cloudOn = !!wa.cloud?.connected;
   const webOn = wa.web?.status === 'connected';
   const waConnected = cloudOn || webOn;
+  const webAllowed = !!wa.webAllowed;
   const waNodes = [
     {
       key: 'choose',
-      title: 'Pick a way to connect',
-      detail: 'Either scan a QR / enter a phone number (uses your regular WhatsApp), or paste Cloud API credentials from Meta (official Business Platform).',
-      how: !waConnected ? 'WhatsApp tab → "Scan QR" / "Enter phone number", or fill in the Cloud API card.' : null,
+      title: webAllowed ? 'Pick a way to connect' : 'Add your Cloud API details',
+      detail: webAllowed
+        ? 'Either scan a QR / enter a phone number (uses your regular WhatsApp), or paste Cloud API credentials from Meta (official Business Platform).'
+        : 'Paste your WhatsApp Cloud API credentials from Meta (official Business Platform).',
+      how: !waConnected
+        ? webAllowed
+          ? 'WhatsApp tab → "Scan QR" / "Enter phone number", or fill in the Cloud API card.'
+          : 'WhatsApp tab → fill in the Cloud API card.'
+        : null,
       status: waConnected ? 'done' : 'current'
     },
     {

@@ -11,6 +11,7 @@ import {
 } from '../services/facebookAuth.js';
 import { loadConnection, saveConnection, clearConnection, safeConn, resolveWhatsappNumber } from '../services/meta.js';
 import { q } from '../db.js';
+import { webPairingAllowed } from '../services/waConnection.js';
 
 export const facebookRouter = express.Router();
 
@@ -207,6 +208,7 @@ facebookRouter.get('/onboarding', async (req, res, next) => {
     // to advertise. Picking "Message you on WhatsApp" as a creative's destination
     // (CreativeCampaignFields.jsx) prompts for a number right there instead —
     // that's the point this actually becomes mandatory.
+    const webAllowed = await webPairingAllowed(req.user.id).catch(() => false);
     steps.push({
       key: 'whatsapp',
       title: 'Connect your WhatsApp number',
@@ -214,10 +216,12 @@ facebookRouter.get('/onboarding', async (req, res, next) => {
       oneLiner: wa.number
         ? `Customers will message ${wa.number}.`
         : "Optional — only needed if you pick WhatsApp as an ad's destination.",
-      why: 'Pairing a number here is one way to set it. If you skip this, you\'ll be asked for a number the moment you choose "Message you on WhatsApp" for an ad — it just can\'t be skipped at that point.',
+      why: 'Connecting a number here is one way to set it. If you skip this, you\'ll be asked for a number the moment you choose "Message you on WhatsApp" for an ad — it just can\'t be skipped at that point.',
       how: [
         'Open the WhatsApp tab (button below).',
-        'Scan the QR code with the phone that has your business number — or enter your WhatsApp Cloud API details.',
+        webAllowed
+          ? 'Scan the QR code with the phone that has your business number — or enter your WhatsApp Cloud API details.'
+          : 'Enter your WhatsApp Cloud API details (Phone number ID and access token from Meta for Developers).',
         'Come back here — this turns green once it is linked.'
       ],
       status: wa.number ? 'done' : 'todo',

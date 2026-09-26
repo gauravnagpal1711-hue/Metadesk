@@ -64,8 +64,19 @@ export async function verifyTokenMatches(token) {
   return rows.length > 0;
 }
 
+/** WhatsApp Web (Baileys) automates the consumer WhatsApp app outside the
+ *  official Business Platform, so it stays limited to the original
+ *  single-tenant owner (the first user), who already relies on it. Every other
+ *  tenant gets the Cloud API only. */
+export async function webPairingAllowed(userId) {
+  const firstU = (await q('SELECT id FROM users ORDER BY id LIMIT 1')).rows[0];
+  return !!firstU && firstU.id === userId;
+}
+
 /** User ids that should have a Baileys socket started on boot. */
 export async function pairedWebUserIds() {
-  const { rows } = await q('SELECT user_id FROM wa_connections WHERE web_paired = true');
+  const { rows } = await q(
+    'SELECT user_id FROM wa_connections WHERE web_paired = true AND user_id = (SELECT id FROM users ORDER BY id LIMIT 1)'
+  );
   return rows.map((r) => r.user_id);
 }

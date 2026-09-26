@@ -14,7 +14,6 @@ export default function Connect({ onConnectionChange }) {
   const [error, setError] = useState('');
   const [pairMethod, setPairMethod] = useState('qr'); // 'qr' | 'phone'
   const [phoneInput, setPhoneInput] = useState('');
-  const [username, setUsername] = useState(null);
   const vc = useValidation(); // Cloud API details form
   const poll = useRef(null);
 
@@ -37,7 +36,6 @@ export default function Connect({ onConnectionChange }) {
       setCloud(c);
       setCloudDraft({ phoneNumberId: c.phoneNumberId || '', token: '', verifyToken: c.verifyToken || '' });
     }).catch(() => {});
-    api.get('/auth/me').then((r) => setUsername(r.user?.username || null)).catch(() => {});
     poll.current = setInterval(refresh, 3000);
     return () => clearInterval(poll.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -144,9 +142,9 @@ export default function Connect({ onConnectionChange }) {
   const waStatus = web.status === 'connected' ? 'good' : web.status === 'pairing' ? 'warn' : '';
   // WhatsApp Web (Baileys) automates the consumer WhatsApp app outside its
   // official Business Platform, which is against WhatsApp's Business Terms.
-  // Keep it restricted to the account that already relies on it in production
-  // instead of surfacing it to every new tenant (or a Meta App Review tester).
-  const showWebPairing = username === 'owner';
+  // The server only allows it for the account that already relies on it in
+  // production, instead of every new tenant (or a Meta App Review tester).
+  const showWebPairing = !!status.webAllowed;
 
   return (
     <>
@@ -339,7 +337,7 @@ export default function Connect({ onConnectionChange }) {
       </div>
 
       <div className="card" style={{ marginTop: 20 }}>
-        <h2>What happens after pairing</h2>
+        <h2>What happens after connecting</h2>
         <p style={{ color: 'var(--muted)', margin: 0, fontSize: 13 }}>
           Every incoming message is matched to a lead by phone number. For campaigns with an Instant Form,
           the lead already exists from the Meta sync, so the message just attaches to it. For click-to-WhatsApp

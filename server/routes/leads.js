@@ -4,7 +4,7 @@ import { q, getSetting, setSetting } from '../db.js';
 import { loadConnection, connConfigured, listLeadForms, fetchFormLeads, flattenLead, normalisePhone } from '../services/meta.js';
 import { sendText, sendMedia, cloudConfigured, sendReaction } from '../services/whatsappCloud.js';
 import { sendWebText, sendWebMedia, webStatus, fetchChatHistory, revokeWebMessage, sendWebReaction } from '../services/whatsappWeb.js';
-import { loadWaConnection } from '../services/waConnection.js';
+import { loadWaConnection, webPairingAllowed } from '../services/waConnection.js';
 import { attachPending } from './whatsapp.js';
 import { suggestReplies, chatProvider } from '../services/ai.js';
 
@@ -767,6 +767,7 @@ leadsRouter.post('/:id/wa/load-earlier', async (req, res, next) => {
     if (!rows.length) return res.status(404).json({ error: 'Lead not found.' });
     const phone = rows[0].phone;
     if (!phone) return res.status(400).json({ error: 'This lead has no phone number.' });
+    if (!(await webPairingAllowed(uid))) return res.status(403).json({ error: 'Chat sync is only available with WhatsApp Web pairing, which is not enabled on this account.' });
     if (webStatus(uid).status !== 'connected') return res.status(400).json({ error: 'WhatsApp Web is not connected — pair it in the WhatsApp tab.' });
 
     // 'back' pages older than the oldest we have; default fills the gap between

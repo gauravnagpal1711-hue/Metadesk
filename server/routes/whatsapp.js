@@ -6,8 +6,10 @@ import {
 } from '../services/whatsappWeb.js';
 import { normalisePhone } from '../services/meta.js';
 import {
-  loadWaConnection, saveWaConnection, userIdForPhoneNumberId, verifyTokenMatches
+  loadWaConnection, saveWaConnection, userIdForPhoneNumberId, verifyTokenMatches, webPairingAllowed
 } from '../services/waConnection.js';
+
+const WEB_NOT_ALLOWED = 'WhatsApp Web pairing is not available on this account — connect a number via the Cloud API instead.';
 
 export const whatsappRouter = express.Router();
 
@@ -286,7 +288,8 @@ onMessageStatus(ingestStatusUpdate);
 whatsappRouter.get('/status', async (req, res, next) => {
   try {
     const wa = await loadWaConnection(req.user.id);
-    const web = webStatus(req.user.id);
+    const webAllowed = await webPairingAllowed(req.user.id);
+    const web = webAllowed ? webStatus(req.user.id) : { status: 'disabled' };
     // Lazily persist a completed pairing so it auto-starts after the next deploy.
     if (web.status === 'connected' && (!wa.webPaired || wa.webPhone !== web.me)) {
       await saveWaConnection(req.user.id, { webPaired: true, webPhone: web.me });
@@ -297,7 +300,8 @@ whatsappRouter.get('/status', async (req, res, next) => {
         phoneNumberId: wa.cloudPhoneNumberId,
         webhookPath: '/api/whatsapp/webhook'
       },
-      web
+      web,
+      webAllowed
     });
   } catch (e) {
     next(e);
@@ -437,6 +441,7 @@ whatsappRouter.get('/quick-replies', async (req, res, next) => {
 
 whatsappRouter.post('/quick-replies/sync', async (req, res, next) => {
   try {
+    if (!(await webPairingAllowed(req.user.id))) return res.status(403).json({ error: WEB_NOT_ALLOWED });
     res.json(await syncPhoneQuickReplies(req.user.id));
   } catch (e) {
     next(e);
@@ -447,6 +452,7 @@ whatsappRouter.post('/quick-replies/sync', async (req, res, next) => {
 
 whatsappRouter.post('/web/connect', async (req, res, next) => {
   try {
+    if (!(await webPairingAllowed(req.user.id))) return res.status(403).json({ error: WEB_NOT_ALLOWED });
     const raw = req.body?.phoneNumber;
     const phoneNumber = raw ? normalisePhone(raw) : null;
     if (raw && !phoneNumber) return res.status(400).json({ error: 'Enter a valid phone number, digits only.' });

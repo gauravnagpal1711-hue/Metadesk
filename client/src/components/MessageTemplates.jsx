@@ -28,6 +28,7 @@ export default function MessageTemplates({ lead, onInsert }) {
   const [error, setError] = useState('');
   const [phoneList, setPhoneList] = useState([]);
   const [syncing, setSyncing] = useState(false);
+  const [webAllowed, setWebAllowed] = useState(false); // phone quick-reply sync needs WhatsApp Web pairing
   const ref = useRef(null);
 
   useOutsideClick(ref, open, () => { setOpen(false); resetForm(); });
@@ -36,11 +37,13 @@ export default function MessageTemplates({ lead, onInsert }) {
     if (!open || loaded) return;
     Promise.all([
       api.get('/whatsapp/templates'),
-      api.get('/whatsapp/quick-replies').catch(() => [])
+      api.get('/whatsapp/quick-replies').catch(() => []),
+      api.get('/whatsapp/status').catch(() => ({}))
     ])
-      .then(([templates, phone]) => {
+      .then(([templates, phone, status]) => {
         setList(Array.isArray(templates) ? templates : []);
         setPhoneList(Array.isArray(phone) ? phone : []);
+        setWebAllowed(!!status.webAllowed);
         setLoaded(true);
       })
       .catch((e) => setError(e.message));
@@ -148,6 +151,7 @@ export default function MessageTemplates({ lead, onInsert }) {
                 + New template
               </button>
 
+              {webAllowed && (<>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '10px 0 4px', paddingTop: 8, borderTop: '1px solid var(--line)' }}>
                 <span className="mono-label" style={{ flex: 1 }}>From your phone</span>
                 <button type="button" className="btn ghost sm" onClick={syncFromPhone} disabled={syncing}>
@@ -173,6 +177,7 @@ export default function MessageTemplates({ lead, onInsert }) {
                   </span>
                 </button>
               ))}
+              </>)}
             </>
           ) : (
             <div style={{ display: 'grid', gap: 6 }}>

@@ -17,7 +17,7 @@ const TABS = [
   { id: 'leads', label: 'Leads', title: 'Leads', sub: 'Drag leads through the funnel · click for detail' },
   { id: 'insights', label: 'Insights', title: 'Insights', sub: 'Pipeline conversion, velocity and lead sources' },
   { id: 'facebook', label: 'Facebook', title: 'Facebook', sub: 'OAuth connection, account and lead form mapping' },
-  { id: 'connect', label: 'WhatsApp', title: 'WhatsApp', sub: 'Pair a device or point the Cloud API webhook here' },
+  { id: 'connect', label: 'WhatsApp', title: 'WhatsApp', sub: 'Connect your WhatsApp Business number' },
   { id: 'flowchart', label: 'How it works', title: 'How it works', sub: 'Live, step-by-step map of what’s done and what’s left' },
   { id: 'reachus', label: 'Reach Us', title: 'Reach Us', sub: 'Send a query straight to WhatsApp' }
 ];
