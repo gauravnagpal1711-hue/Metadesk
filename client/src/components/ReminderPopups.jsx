@@ -8,8 +8,6 @@ const SNOOZE_MS = 60 * 60 * 1000;
 const MAX_VISIBLE = 5;
 
 const KIND_ICON = { call: '📞', meeting: '🤝', whatsapp: '💬', email: '✉️', todo: '☑️' };
-const TYPE_ICON = { followup: '🔔', appointment: '📅' };
-const TYPE_LABEL = { followup: 'Follow-up due', appointment: 'Appointment due' };
 
 function readStore(key) {
   try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch { return {}; }
@@ -18,8 +16,8 @@ function writeStore(key, obj) {
   try { localStorage.setItem(key, JSON.stringify(obj)); } catch { /* storage unavailable */ }
 }
 
-/** A due task/follow-up/appointment stops mattering once it's no longer in
- *  the server's "due" list (done, rescheduled, or the lead moved past it) —
+/** A due task stops mattering once it's no longer in
+ *  the server's "due" list (done or rescheduled) —
  *  so pruning dismissed/snoozed state down to what's still due is enough
  *  bookkeeping; nothing to expire by hand. */
 function prune(store, liveKeys) {
@@ -33,9 +31,8 @@ function reminderKey(r) {
 }
 
 /**
- * App-wide "something is due" toasts — polls regardless of which tab is open,
- * so a follow-up or appointment actually gets surfaced instead of waiting to
- * be noticed as a red date chip. Dismiss/snooze state lives in localStorage
+ * App-wide "task is due" toasts — polls regardless of which tab is open, so a
+ * due task actually gets surfaced. Follow-ups and appointments don't pop up. Dismiss/snooze state lives in localStorage
  * (per browser, not synced) since these are just "don't nag me again" flags.
  */
 export default function ReminderPopups({ enabled, onOpenLead, onGoToLeads }) {
@@ -106,14 +103,14 @@ export default function ReminderPopups({ enabled, onOpenLead, onGoToLeads }) {
     <div className="reminder-stack">
       {shown.map((r) => (
         <div key={reminderKey(r)} className="reminder-toast">
-          <span className="reminder-icon">{r.type === 'task' ? (KIND_ICON[r.kind] || '☑️') : TYPE_ICON[r.type]}</span>
+          <span className="reminder-icon">{KIND_ICON[r.kind] || '☑️'}</span>
           <div className="reminder-body">
-            <div className="reminder-title">{r.type === 'task' ? r.title : TYPE_LABEL[r.type]}</div>
+            <div className="reminder-title">{r.title}</div>
             <div className="reminder-sub">{r.lead_name || r.lead_phone || 'Lead'}</div>
             <div className="reminder-when" title={shortDateTime(r.due_at)}>{relativeShort(r.due_at)}</div>
             <div className="reminder-actions">
-              <button className="btn primary sm" onClick={() => onOpenLead?.(r.lead_id ?? r.id)}>Open lead</button>
-              {r.type === 'task' && <button className="btn ghost sm" onClick={() => markDone(r)}>Mark done</button>}
+              <button className="btn primary sm" onClick={() => onOpenLead?.(r.lead_id)}>Open lead</button>
+              <button className="btn ghost sm" onClick={() => markDone(r)}>Mark done</button>
               <button className="btn ghost sm" onClick={() => snooze(r)}>Snooze 1h</button>
               <button className="btn ghost sm" onClick={() => dismiss(r)} aria-label="Dismiss">×</button>
             </div>
