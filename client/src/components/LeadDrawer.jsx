@@ -767,9 +767,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
                   <a
                     className="btn primary sm"
                     style={{ marginLeft: 8 }}
-                    href={`https://wa.me/${String(lead.phone).replace(/\D/g, '')}`}
-                    target="_blank"
-                    rel="noreferrer"
+                    href={`whatsapp://send?phone=${String(lead.phone).replace(/\D/g, '')}`}
                     title="WhatsApp call — opens this chat in WhatsApp, tap the call icon there"
                     aria-label="WhatsApp call"
                   >
