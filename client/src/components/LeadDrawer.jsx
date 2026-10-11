@@ -879,6 +879,22 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
               {lead.ad_referral && <AdCard ad={lead.ad_referral} />}
               <FormAnswersCard fields={lead.fields} />
 
+              {lead.phone && (
+                <div style={{ textAlign: 'center', margin: '2px 0 8px' }}>
+                  {/* WhatsApp has no call-only deep link — this opens the chat in the
+                      WhatsApp app (phone or desktop), where the call button is one tap. */}
+                  <a
+                    className="btn primary sm"
+                    href={`https://wa.me/${String(lead.phone).replace(/\D/g, '')}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Opens this chat in WhatsApp — tap the call icon there"
+                  >
+                    📞 WhatsApp call
+                  </a>
+                </div>
+              )}
+
               {webAllowed && (
                 <div style={{ textAlign: 'center', margin: '2px 0 8px', display: 'flex', gap: 6, justifyContent: 'center' }}>
                   <button className="btn ghost sm" onClick={() => loadEarlier()} disabled={loadingEarlier}>
