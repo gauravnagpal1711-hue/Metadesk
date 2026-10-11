@@ -1117,10 +1117,16 @@ leadsRouter.post('/:id/messages', async (req, res, next) => {
     }
 
     const meta = quoted ? { reply_to: { body: quoted.body || '(message)' } } : null;
-    const { rows } = await q(
-      'INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, media_data, media_mime, meta, user_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+    // WhatsApp may have echoed this message back and stored it already.
+    let { rows } = await q(
+      `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, media_data, media_mime, meta, user_id)
+       SELECT $1::int,$2::text,$3::text,$4::text,$5::text,$6::text,$7::text,$8::jsonb,$9::int
+       WHERE NOT EXISTS (SELECT 1 FROM messages WHERE wa_message_id = $5::text AND user_id = $9::int) RETURNING *`,
       [req.params.id, 'out', 'whatsapp', body || null, waMessageId, mediaData || null, mediaMime || null, meta ? JSON.stringify(meta) : null, uid]
     );
+    if (!rows.length) {
+      ({ rows } = await q('SELECT * FROM messages WHERE wa_message_id = $1 AND user_id = $2', [waMessageId, uid]));
+    }
     await q('UPDATE leads SET last_contacted_at = now(), updated_at = now() WHERE id = $1', [req.params.id]);
 
     res.json({ ...rows[0], sent_via: sentVia });

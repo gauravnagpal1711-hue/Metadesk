@@ -162,7 +162,8 @@ export async function ingestIncoming(userId, m) {
 
   await q(
     `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, media_data, media_mime, meta, created_at, user_id)
-    VALUES ($1,$2,'whatsapp',$3,$4,$5,$6,$7,$8,$9)`,
+    SELECT $1::int,$2::text,'whatsapp',$3::text,$4::text,$5::text,$6::text,$7::jsonb,$8::timestamptz,$9::int
+    WHERE NOT EXISTS (SELECT 1 FROM messages WHERE wa_message_id = $4::text AND user_id = $9::int)`,
     [lead.id, fromMe ? 'out' : 'in', body, wa_message_id, media_data || null, media_mime || null,
      meta ? JSON.stringify(meta) : null, ts || new Date(), userId]
   );
@@ -230,7 +231,8 @@ async function ingestHistoryBatch(userId, items) {
 
       await q(
         `INSERT INTO messages (lead_id, direction, channel, body, wa_message_id, media_data, media_mime, meta, created_at, user_id)
-        VALUES ($1,$2,'whatsapp',$3,$4,$5,$6,$7,$8,$9)`,
+        SELECT $1::int,$2::text,'whatsapp',$3::text,$4::text,$5::text,$6::text,$7::jsonb,$8::timestamptz,$9::int
+        WHERE NOT EXISTS (SELECT 1 FROM messages WHERE wa_message_id = $4::text AND user_id = $9::int)`,
         [lead.id, item.fromMe ? 'out' : 'in', item.body, item.wa_message_id, item.media_data || null, item.media_mime || null,
          item.meta ? JSON.stringify(item.meta) : null, item.ts, userId]
       );

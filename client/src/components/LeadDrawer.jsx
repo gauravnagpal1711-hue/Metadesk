@@ -185,6 +185,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
   const [customRows, setCustomRows] = useState([]);
   const [pendingStage, setPendingStage] = useState(null); // { stageId, needsAppointment, needsFollowup, needsLostReason, ... }
   const [copiedPhone, setCopiedPhone] = useState(false);
@@ -337,6 +338,8 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
 
   async function send() {
     if (!draft.trim() && attachments.length === 0) return;
+    if (sendingRef.current) return; // state is async; a fast double-Enter would slip through
+    sendingRef.current = true;
     setSending(true);
     setError('');
     const replyToId = replyTarget?.id;
@@ -366,6 +369,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
     } catch (e) {
       setError(e.message);
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   }
