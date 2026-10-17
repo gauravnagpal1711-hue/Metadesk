@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, when } from '../api.js';
 import { bucketOf, shortDateTime, toDatetimeLocal } from '../lib/dateBuckets.js';
 import MessageTemplates from './MessageTemplates.jsx';
+import LostReasonPicker from './LostReasonPicker.jsx';
 
 const TASK_KINDS = ['todo', 'call', 'meeting', 'whatsapp', 'email'];
 
@@ -825,11 +826,9 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
               {pendingStage.needsLostReason && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span className="mono-label" style={{ flex: '0 0 auto' }}>Lost reason</span>
-                  <input
-                    className="input"
-                    placeholder="Why was this lost?"
+                  <LostReasonPicker
                     value={pendingStage.lostReason}
-                    onChange={(e) => setPendingStage((p) => ({ ...p, lostReason: e.target.value }))}
+                    onChange={(v) => setPendingStage((p) => ({ ...p, lostReason: v }))}
                     style={{ flex: 1 }}
                     autoFocus={!pendingStage.needsAppointment && !pendingStage.needsFollowup}
                   />
@@ -1143,13 +1142,12 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
 
               {(lead.lost_reason || stage?.is_lost) && (
                 <div className="field">
-                  <label htmlFor="f-lost_reason">Lost reason</label>
-                  <input
-                    id="f-lost_reason"
-                    className="input"
-                    defaultValue={lead.lost_reason ?? ''}
-                    key={lead.lost_reason ?? ''}
-                    onBlur={(e) => saveField('lost_reason', e.target.value)}
+                  <label>Lost reason</label>
+                  <LostReasonPicker
+                    key={lead.id}
+                    saveNoteOnBlur
+                    value={lead.lost_reason ?? ''}
+                    onChange={(v) => saveField('lost_reason', v)}
                   />
                 </div>
               )}

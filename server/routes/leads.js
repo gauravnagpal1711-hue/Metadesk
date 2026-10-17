@@ -320,7 +320,9 @@ leadsRouter.get('/analytics', async (req, res, next) => {
     const open = byStage.filter((s) => !s.is_won && !s.is_lost).reduce((a, s) => ({ count: a.count + s.count, value: a.value + s.value }), { count: 0, value: 0 });
 
     const [lostReasons, bySource, byCampaign, newLeads, daily, velocity, stale] = await Promise.all([
-      q(`SELECT COALESCE(NULLIF(trim(l.lost_reason), ''), 'Not specified') AS reason, count(*)::int AS count
+      q(`SELECT CASE WHEN NULLIF(trim(l.lost_reason), '') IS NULL THEN 'Not specified'
+                     WHEN l.lost_reason ILIKE 'Other%' THEN 'Other'
+                     ELSE trim(l.lost_reason) END AS reason, count(*)::int AS count
          FROM leads l JOIN stages s ON s.id = l.stage_id WHERE s.is_lost AND ${rw}
          GROUP BY reason ORDER BY count DESC LIMIT 10`, params),
       q(`SELECT COALESCE(l.source,'unknown') AS source, count(*)::int AS count

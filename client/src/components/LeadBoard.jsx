@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api, when } from '../api.js';
 import EditableDateChip from './EditableDateChip.jsx';
+import LostReasonPicker from './LostReasonPicker.jsx';
 
 const SORT_FIELD_KEYS = {
   created: 'created_at',
@@ -306,11 +307,9 @@ export default function LeadBoard({ stages, leads, unreadFirst = false, onOpenLe
                 {pendingDrop.needsLostReason && (
                   <div className="field">
                     <label>Lost reason</label>
-                    <input
-                      className="input"
-                      placeholder="Budget too low / went with a competitor / no response…"
+                    <LostReasonPicker
                       value={pendingDrop.lostReason}
-                      onChange={(e) => setPendingDrop((p) => ({ ...p, lostReason: e.target.value }))}
+                      onChange={(v) => setPendingDrop((p) => ({ ...p, lostReason: v }))}
                       autoFocus={!pendingDrop.needsAppointment && !pendingDrop.needsFollowup}
                     />
                   </div>
