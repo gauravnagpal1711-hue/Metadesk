@@ -7,7 +7,8 @@ import {
   fetchMe,
   fetchAdAccounts,
   fetchPages,
-  fetchOnboardingSnapshot
+  fetchOnboardingSnapshot,
+  fetchAdBalance
 } from '../services/facebookAuth.js';
 import { loadConnection, saveConnection, clearConnection, safeConn, resolveWhatsappNumber } from '../services/meta.js';
 import { q } from '../db.js';
@@ -306,6 +307,26 @@ facebookRouter.get('/onboarding', async (req, res, next) => {
       console.warn(`[Facebook onboarding] user ${req.user.id} partial Graph read: ${snap.errors.join(' | ')}`);
     }
     res.json({ connected: !!conn.accessToken, ready, steps, errors: snap.errors });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Ad account balance + a deep link to Meta's billing page. Meta's API has no
+ * endpoint for adding funds (payment details are only taken on facebook.com),
+ * so "add money" opens the billing page for the selected account.
+ */
+facebookRouter.get('/billing', async (req, res, next) => {
+  try {
+    const conn = await loadConnection(req.user.id);
+    if (!conn.accessToken) return res.status(400).json({ error: 'Connect Facebook first.' });
+    if (!conn.adAccountId) return res.status(400).json({ error: 'Choose an ad account first.' });
+    const balance = await fetchAdBalance(conn.accessToken, conn.adAccountId);
+    res.json({
+      ...balance,
+      billingUrl: `${FB}/ads/manager/account_settings/account_billing/?act=${bareActId(conn.adAccountId)}`
+    });
   } catch (e) {
     next(e);
   }

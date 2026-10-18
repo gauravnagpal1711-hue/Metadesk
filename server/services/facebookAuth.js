@@ -104,6 +104,33 @@ export async function fetchPages(token) {
     return json.data;
 }
 
+const ZERO_DECIMAL = new Set(['JPY', 'KRW', 'VND', 'CLP', 'ISK', 'HUF', 'TWD']);
+
+/** Money fields Meta returns in minor units (e.g. paise) -> major-unit numbers. */
+export async function fetchAdBalance(token, adAccountId) {
+    const act = `act_${String(adAccountId).replace(/^act_/, '')}`;
+    const fields = 'name,currency,account_status,balance,amount_spent,spend_cap,is_prepay_account,funding_source_details{id,display_string,type}';
+    const res = await fetch(`${GRAPH}/${act}?fields=${fields}&access_token=${token}`);
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error?.message || 'Could not read the ad account balance.');
+    const div = ZERO_DECIMAL.has(json.currency) ? 1 : 100;
+    const money = (v) => (v == null || v === '' ? null : Number(v) / div);
+    const spendCap = money(json.spend_cap);
+    return {
+        name: json.name,
+        currency: json.currency,
+        accountStatus: Number(json.account_status),
+        isPrepay: !!json.is_prepay_account,
+        // For postpaid accounts `balance` is the amount owed and not yet charged.
+        amountOwed: money(json.balance),
+        amountSpent: money(json.amount_spent),
+        spendCap: spendCap || null,
+        // Prepaid accounts only expose the available funds inside this string.
+        fundingLabel: json.funding_source_details?.display_string || null,
+        fundingType: json.funding_source_details?.type ?? null,
+    };
+}
+
 /**
  * One batched read of everything the onboarding checklist inspects: the profile,
  * ad accounts (with billing/status fields) and Pages (with the caller's task

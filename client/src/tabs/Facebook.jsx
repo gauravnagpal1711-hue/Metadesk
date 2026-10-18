@@ -2,6 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import OnboardingChecklist from '../components/OnboardingChecklist.jsx';
 
+function fmtMoney(n, currency) {
+  try {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency: currency || 'INR' }).format(n);
+  } catch {
+    return `${currency || ''} ${n}`.trim();
+  }
+}
+
 export default function Facebook({ onConnectionChange, onNavigate }) {
   const [status, setStatus] = useState(null);
   const [options, setOptions] = useState(null);
@@ -9,6 +17,8 @@ export default function Facebook({ onConnectionChange, onNavigate }) {
   const [pageId, setPageId] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [billing, setBilling] = useState(null);
+  const [billingError, setBillingError] = useState('');
   const pickerRef = useRef(null);
 
   const focusPicker = useCallback(() => {
@@ -30,6 +40,20 @@ export default function Facebook({ onConnectionChange, onNavigate }) {
       setError(e.message);
     }
   }, [onConnectionChange]);
+
+  const loadBilling = useCallback(async () => {
+    setBilling(null);
+    setBillingError('');
+    try {
+      setBilling(await api.get('/facebook/billing'));
+    } catch (e) {
+      setBillingError(e.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (status?.connection?.hasToken && status.connection.adAccountId) loadBilling();
+  }, [status?.connection?.hasToken, status?.connection?.adAccountId, loadBilling]);
 
   useEffect(() => {
     refresh();
@@ -192,6 +216,53 @@ export default function Facebook({ onConnectionChange, onNavigate }) {
           )}
         </div>
       </div>
+
+      {connected && conn.adAccountId && (
+        <div className="card" style={{ marginTop: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <h2 style={{ margin: 0 }}>Ad balance</h2>
+            <button className="btn" style={{ marginLeft: 'auto' }} onClick={loadBilling}>Refresh</button>
+          </div>
+          {billingError ? (
+            <div className="notice bad" style={{ marginTop: 12 }}>{billingError}</div>
+          ) : !billing ? (
+            <div style={{ color: 'var(--muted)', marginTop: 12 }}>Loading balance…</div>
+          ) : (
+            <>
+              <div className="kv-rows">
+                <div className="row">
+                  <span className="k">{billing.isPrepay ? 'Funds' : 'Payment method'}</span>
+                  <span className="v">{billing.fundingLabel || 'No payment method on file'}</span>
+                </div>
+                {!billing.isPrepay && billing.amountOwed != null && (
+                  <div className="row">
+                    <span className="k">Owed, not yet charged</span>
+                    <span className="v">{fmtMoney(billing.amountOwed, billing.currency)}</span>
+                  </div>
+                )}
+                {billing.amountSpent != null && (
+                  <div className="row">
+                    <span className="k">Total spent</span>
+                    <span className="v">{fmtMoney(billing.amountSpent, billing.currency)}</span>
+                  </div>
+                )}
+                {billing.spendCap != null && (
+                  <div className="row">
+                    <span className="k">Spending limit</span>
+                    <span className="v">{fmtMoney(billing.spendCap, billing.currency)}</span>
+                  </div>
+                )}
+              </div>
+              <p style={{ color: 'var(--muted)', fontSize: 12.5, margin: '12px 0' }}>
+                Facebook only takes payments on its own page, so "Add money" opens your billing settings there.
+              </p>
+              <a className="btn primary" href={billing.billingUrl} target="_blank" rel="noreferrer">
+                Add money on Meta
+              </a>
+            </>
+          )}
+        </div>
+      )}
 
       {ready && (
         <div className="notice" style={{ borderLeftColor: 'var(--good)', marginTop: 20 }}>
