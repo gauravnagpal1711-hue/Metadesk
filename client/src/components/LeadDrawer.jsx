@@ -887,6 +887,16 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
           </div>
         </div>
 
+        {stage?.is_lost && (
+          <div
+            style={{ padding: '8px 16px', fontSize: 13, color: 'var(--bad, #c0392b)', background: 'rgba(192,57,43,0.08)', borderBottom: '1px solid var(--line)', cursor: 'pointer' }}
+            onClick={() => setView('details')}
+            title="Edit in Details"
+          >
+            <strong>Lost reason:</strong> {lead.lost_reason || 'not specified'}
+          </div>
+        )}
+
         <nav className="drawer-tabs">
           {[
             ['chat', `Conversation${messages.length ? ` (${messages.length})` : ''}`],
