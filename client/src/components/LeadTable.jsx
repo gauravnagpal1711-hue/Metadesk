@@ -273,6 +273,11 @@ export default function LeadTable({ filters, query, stages, onOpenLead, reloadSi
                     >
                       {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
+                    {stage?.is_lost && lead.lost_reason && (
+                      <div className="muted" style={{ fontSize: 11, marginTop: 3, maxWidth: 180 }} title={lead.lost_reason}>
+                        {lead.lost_reason}
+                      </div>
+                    )}
                   </td>
                   <td>
                     {lead.campaign_name || '—'}

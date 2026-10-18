@@ -238,6 +238,11 @@ export default function LeadBoard({ stages, leads, unreadFirst = false, onOpenLe
                           {lead.from_adsdesk && <span className="tag good" style={{ marginLeft: 5 }}>Ads Desk</span>}
                         </div>
                       )}
+                      {lead.lost_reason && (
+                        <div className="meta" style={{ color: 'var(--bad, #c0392b)' }} title={lead.lost_reason}>
+                          Lost: {lead.lost_reason}
+                        </div>
+                      )}
                       {lead.tags?.length > 0 && (
                         <div className="lead-tags">
                           {lead.tags.map((t) => <span key={t} className="tag off">{t}</span>)}
