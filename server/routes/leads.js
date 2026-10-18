@@ -628,6 +628,15 @@ leadsRouter.post('/bulk-delete', async (req, res, next) => {
   try {
     const { ids } = req.body || {};
     if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'No leads selected.' });
+    // Same key as the Excel export; the first one submitted becomes the key.
+    const key = String(req.body?.key || '');
+    const hash = await getSetting(req.user.id, 'export_key_hash', null);
+    if (!hash) {
+      if (key.length < 6) return res.status(400).json({ error: 'Set a key of at least 6 characters.' });
+      await setSetting(req.user.id, 'export_key_hash', bcrypt.hashSync(key, 10));
+    } else if (!bcrypt.compareSync(key, hash)) {
+      return res.status(403).json({ error: 'Wrong key.' });
+    }
     const numIds = ids.map(Number).filter(Number.isFinite);
     const { rowCount } = await q('DELETE FROM leads WHERE id = ANY($1::int[]) AND user_id = $2', [numIds, req.user.id]);
     res.json({ ok: true, deleted: rowCount });

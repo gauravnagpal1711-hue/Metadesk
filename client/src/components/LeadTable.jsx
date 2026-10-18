@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, when, money } from '../api.js';
 import EditableDateChip from './EditableDateChip.jsx';
+import { askKey } from '../lib/exportKey.js';
 
 const PAGE_SIZE = 50;
 
@@ -132,7 +133,9 @@ export default function LeadTable({ filters, query, stages, onOpenLead, reloadSi
     if (selected.size === 0) return;
     if (!window.confirm(`Delete ${selected.size} lead${selected.size === 1 ? '' : 's'}? This cannot be undone.`)) return;
     try {
-      await api.post('/leads/bulk-delete', { ids: [...selected] });
+      const key = await askKey('delete leads');
+      if (!key) return;
+      await api.post('/leads/bulk-delete', { ids: [...selected], key });
       await load();
       onChanged?.();
     } catch (e) {

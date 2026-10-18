@@ -3,6 +3,7 @@ import { api, when } from '../api.js';
 import { bucketOf, shortDateTime, toDatetimeLocal } from '../lib/dateBuckets.js';
 import MessageTemplates from './MessageTemplates.jsx';
 import LostReasonPicker from './LostReasonPicker.jsx';
+import { askKey } from '../lib/exportKey.js';
 
 const TASK_KINDS = ['todo', 'call', 'meeting', 'whatsapp', 'email'];
 
@@ -750,6 +751,18 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
     setCustomRows((rows) => [...rows, { key: '', value: '' }]);
   }
 
+  async function deleteLead() {
+    if (!window.confirm(`Delete ${lead.full_name || 'this lead'}? This cannot be undone.`)) return;
+    try {
+      const key = await askKey('delete this lead');
+      if (!key) return;
+      await api.post('/leads/bulk-delete', { ids: [leadId], key });
+      onClose();
+    } catch (e) {
+      window.alert(e.message);
+    }
+  }
+
   return (
     <>
       <div className="scrim" onClick={onClose} />
@@ -781,6 +794,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
                 )}
               </div>
             </div>
+            <button className="close" onClick={deleteLead} aria-label="Delete lead" title="Delete lead (needs your key)" style={{ fontSize: 15 }}>🗑</button>
             <button className="close" onClick={onClose} aria-label="Close">×</button>
           </div>
           <div className="stage-chips">
