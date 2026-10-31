@@ -7,6 +7,7 @@ import { sendWebText, sendWebMedia, webStatus, fetchChatHistory, revokeWebMessag
 import { loadWaConnection, webPairingAllowed } from '../services/waConnection.js';
 import { attachPending } from './whatsapp.js';
 import { suggestReplies, chatProvider } from '../services/ai.js';
+import { onAppointmentSet } from '../services/appointmentMessages.js';
 
 export const leadsRouter = express.Router();
 
@@ -994,6 +995,8 @@ leadsRouter.patch('/:id', async (req, res, next) => {
         lost_reason !== undefined, uid]
     );
     res.json(rows[0]);
+    // Auto WhatsApp confirmation — after responding so the UI isn't held up.
+    if (appointment_date) onAppointmentSet(uid, Number(req.params.id));
   } catch (e) {
     next(e);
   }
@@ -1020,6 +1023,7 @@ leadsRouter.patch('/:id/move', async (req, res, next) => {
     const effLostReason = (lost_reason && String(lost_reason).trim()) || check.existingLostReason;
     await q('INSERT INTO activity (lead_id, kind, detail, user_id) VALUES ($1, $2, $3, $4)', [req.params.id, 'moved', movedDetail(check.stage, effLostReason), uid]);
     res.json(rows[0]);
+    if (appointment_date) onAppointmentSet(uid, Number(req.params.id));
   } catch (e) {
     next(e);
   }

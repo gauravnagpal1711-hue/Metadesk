@@ -120,6 +120,11 @@ ALTER TABLE leads ADD COLUMN IF NOT EXISTS ad_referral JSONB;
 -- Last time the user opened this lead's WhatsApp chat in the app. Inbound
 -- messages newer than this count as unread (see LEAD_ENRICH.unread_count).
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS wa_last_read_at TIMESTAMPTZ;
+-- Automatic appointment WhatsApp messages: which appointment_date each
+-- message was last sent for (so a reschedule re-sends, a re-save doesn't).
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS appt_confirm_sent_for TIMESTAMPTZ;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS appt_confirm_sent_at TIMESTAMPTZ;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS appt_reminder_sent_for TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS leads_stage_idx ON leads(stage_id);
 CREATE INDEX IF NOT EXISTS leads_phone_idx ON leads(phone);

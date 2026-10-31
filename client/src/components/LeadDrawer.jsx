@@ -334,7 +334,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
       ts: a.created_at,
       dateLabel: new Date(a.created_at).toLocaleString(),
       update: a.detail,
-      user: a.author === 'upload' ? 'Upload' : 'You'
+      user: a.author === 'upload' ? 'Upload' : a.author === 'auto' ? 'Auto' : 'You'
     }))
   ].sort((a, b) => new Date(b.ts) - new Date(a.ts));
 

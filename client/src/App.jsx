@@ -9,6 +9,7 @@ import Connect from './tabs/Connect.jsx';
 import Facebook from './tabs/Facebook.jsx';
 import ReachUs from './tabs/ReachUs.jsx';
 import Flowchart from './tabs/Flowchart.jsx';
+import AppointmentMessages from './tabs/AppointmentMessages.jsx';
 import ReminderPopups from './components/ReminderPopups.jsx';
 
 const TABS = [
@@ -17,6 +18,7 @@ const TABS = [
   { id: 'leads', label: 'Leads', title: 'Leads', sub: 'Drag leads through the funnel · click for detail' },
   { id: 'insights', label: 'Insights', title: 'Insights', sub: 'Pipeline conversion, velocity and lead sources' },
   { id: 'facebook', label: 'Facebook', title: 'Facebook', sub: 'OAuth connection, account and lead form mapping' },
+  { id: 'apptmsgs', label: 'Appointment messages', title: 'Appointment messages', sub: 'Auto WhatsApp confirmation + day-before reminder' },
   { id: 'connect', label: 'WhatsApp', title: 'WhatsApp', sub: 'Connect your WhatsApp Business number' },
   { id: 'flowchart', label: 'How it works', title: 'How it works', sub: 'Live, step-by-step map of what’s done and what’s left' },
   { id: 'reachus', label: 'Reach Us', title: 'Reach Us', sub: 'Send a query straight to WhatsApp' }
@@ -231,6 +233,7 @@ export default function App() {
           {tab === 'insights' && <Insights campaigns={campaigns} syncSignal={syncSignal} />}
           {tab === 'facebook' && <Facebook onConnectionChange={refreshConnections} onNavigate={setTab} />}
           {tab === 'connect' && <Connect onConnectionChange={refreshConnections} />}
+          {tab === 'apptmsgs' && <AppointmentMessages />}
           {tab === 'flowchart' && <Flowchart />}
           {tab === 'reachus' && <ReachUs />}
         </div>

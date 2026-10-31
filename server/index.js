@@ -18,6 +18,8 @@ import { reachUsRouter } from './routes/reachUs.js';
 import { legalRouter } from './routes/legal.js';
 import { dataDeletionRouter } from './routes/dataDeletion.js';
 import { facebookRouter } from './routes/facebook.js';
+import { appointmentMessagesRouter } from './routes/appointmentMessages.js';
+import { sendDueAppointmentReminders } from './services/appointmentMessages.js';
 import { loadConnection, connConfigured, listCampaigns, listLeadForms, fetchFormLeads, flattenLead, normalisePhone } from './services/meta.js';
 import { startAllWebSessions } from './services/whatsappWeb.js';
 import { pairedWebUserIds } from './services/waConnection.js';
@@ -58,6 +60,7 @@ app.use('/api/meta', metaTargetingRouter);
 app.use('/api/leads', leadsRouter);
 app.use('/api/whatsapp', whatsappRouter);
 app.use('/api/reach-us', reachUsRouter);
+app.use('/api/appointment-messages', appointmentMessagesRouter);
 
 // Serve the built React app for every non-API route.
 const clientDist = path.join(__dirname, '..', 'client', 'dist');
@@ -175,6 +178,11 @@ if (process.env.ADS_DESK_NO_BOOT !== '1') initDb()
     // Auto-delete unsaved 'review' creative drafts once their 30-day window lapses.
     pruneExpiredReviewDrafts();
     setInterval(pruneExpiredReviewDrafts, 6 * 60 * 60 * 1000);
+
+    // Day-before appointment reminders on WhatsApp. First run waits a minute so
+    // WhatsApp Web sockets have reconnected after a deploy.
+    setTimeout(sendDueAppointmentReminders, 60 * 1000);
+    setInterval(sendDueAppointmentReminders, 15 * 60 * 1000);
 
     if (process.env.WA_WEB_AUTOSTART !== 'false') {
       pairedWebUserIds()
