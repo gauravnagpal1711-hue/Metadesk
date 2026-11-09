@@ -55,27 +55,12 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConne
       setBusyKey(step.key);
       const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.matchMedia('(max-width: 820px)').matches;
       let url = a.url;
-      // On phones www.facebook.com/pages/create is hijacked (Facebook app / mobile
-      // redirect) and lands on the home feed — use the mobile page-creation URL.
-      // /pages/creation/ is the route Facebook's own "Create" menu uses, which the
-      // app and mobile site both route to the Page-creation flow (not the feed).
-      if (isMobile) url = url.replace('://www.facebook.com/', '://m.facebook.com/');
-      // The installed Facebook app claims facebook.com links and opens its home screen.
-      // Force the page to open inside the browser instead, so the person's existing
-      // web login is used and the exact page loads.
-      const ua = navigator.userAgent;
-      if (isMobile && /Android/i.test(ua)) {
-        const u = new URL(url);
-        const pkg = /Firefox/i.test(ua) ? 'org.mozilla.firefox' : /SamsungBrowser/i.test(ua) ? 'com.sec.android.app.sbrowser' : 'com.android.chrome';
-        url = `intent://${u.host}${u.pathname}${u.search}#Intent;scheme=https;package=${pkg};S.browser_fallback_url=${encodeURIComponent(a.url)};end`;
-      } else if (isMobile && /CriOS/i.test(ua)) {
-        url = url.replace(/^https:/, 'googlechromes:');
-      }
-      // intent:// and googlechromes:// are launched by assigning location (window.open
-      // would leave a blank tab behind); a plain https URL opens in a new tab.
+      // Open with a plain https window.open. An intent:// launch is dispatched at the OS
+      // level, which lets the installed Facebook app claim the link and show its home
+      // screen; a normal in-browser navigation stays in the browser and loads the exact
+      // Page-creation page with the person's existing web login.
       let w = null;
-      if (/^(intent|googlechromes):/.test(url)) window.location.href = url;
-      else w = isMobile ? window.open(url, '_blank') : window.open(url, 'meta-setup', 'width=780,height=820');
+      w = isMobile ? window.open(url, '_blank') : window.open(url, 'meta-setup', 'width=780,height=820');
       // Refresh when the popup closes (desktop) or when the user comes back to this tab (phone).
       const done = async () => { await refresh(); setBusyKey(''); };
       const timer = setInterval(() => {
