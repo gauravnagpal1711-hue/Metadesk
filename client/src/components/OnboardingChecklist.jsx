@@ -41,6 +41,17 @@ function MobilePageCard({ url, onCheck, checking }) {
   return (
     <div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 12, background: 'var(--accent-soft-2)' }}>
       <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>Link to create your Facebook Page</div>
+      <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>
+        Try one tap first — if it opens the Facebook home feed instead, use the copy &amp; paste below.
+      </div>
+      <a className="btn primary" href={url} target="_blank" rel="noopener noreferrer"
+        style={{ display: 'block', textAlign: 'center', textDecoration: 'none', marginBottom: 8 }}>
+        Option A · Open page creation ↗
+      </a>
+      <a className="btn" href="fb://page_creation"
+        style={{ display: 'block', textAlign: 'center', textDecoration: 'none', marginBottom: 12 }}>
+        Option B · Open in Facebook app ↗
+      </a>
       <input
         readOnly
         value={url}
