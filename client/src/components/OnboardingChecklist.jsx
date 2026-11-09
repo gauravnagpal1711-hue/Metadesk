@@ -9,6 +9,65 @@ import { api } from '../api.js';
  * popup closes. Each step is collapsed to a title + one line; tap to expand the
  * "why" and the "how".
  */
+function isMobileDevice() {
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.matchMedia('(max-width: 820px)').matches;
+}
+
+/**
+ * Phone version of "Create a Facebook Page". The Facebook app grabs every facebook.com
+ * link and shows its home feed, so instead of a link we show the 4 taps to do inside
+ * the app, plus an easy way to finish on a laptop. The list re-checks on return.
+ */
+function MobilePageCard({ url, onCheck, checking }) {
+  const steps = [
+    ['Open the Facebook app', 'the blue "f" icon on your phone'],
+    ['Tap the menu ☰', 'three lines — bottom right (iPhone) or top right (Android)'],
+    ['Tap "Pages", then "Create"', 'if you don\'t see Pages, tap "See more"'],
+    ['Type your business name and tap "Create Page"', 'pick any category, you can change it later']
+  ];
+  // Re-check automatically when the person comes back from the Facebook app.
+  useEffect(() => {
+    const onVis = () => { if (document.visibilityState === 'visible') onCheck(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [onCheck]);
+  async function sendToLaptop() {
+    try {
+      if (navigator.share) { await navigator.share({ title: 'Create my Facebook Page', url }); return; }
+    } catch { return; }
+    try { await navigator.clipboard.writeText(url); alert('Link copied. Paste it in a browser on your laptop.'); } catch { window.prompt('Copy this link:', url); }
+  }
+  return (
+    <div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 12, background: 'var(--accent-soft-2)' }}>
+      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>Create your Page in 4 taps</div>
+      {steps.map(([t, sub], i) => (
+        <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 0' }}>
+          <span aria-hidden style={{
+            flex: '0 0 auto', width: 26, height: 26, borderRadius: '50%', background: 'var(--accent)', color: '#fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700
+          }}>{i + 1}</span>
+          <span style={{ fontSize: 14, lineHeight: 1.35 }}>
+            <strong>{t}</strong>
+            <span style={{ display: 'block', fontSize: 12.5, color: 'var(--muted)' }}>{sub}</span>
+          </span>
+        </div>
+      ))}
+      <a className="btn primary" href="fb://" style={{ display: 'block', textAlign: 'center', marginTop: 6, textDecoration: 'none' }}>
+        1 · Open Facebook app
+      </a>
+      <button className="btn" onClick={onCheck} disabled={checking} style={{ width: '100%', marginTop: 8 }}>
+        {checking ? 'Checking…' : '✓ I created my Page — check now'}
+      </button>
+      <button type="button" onClick={sendToLaptop} style={{
+        width: '100%', marginTop: 8, background: 'none', border: 'none', color: 'var(--accent)',
+        fontSize: 13, textDecoration: 'underline', cursor: 'pointer'
+      }}>
+        Easier on a computer? Send me the link
+      </button>
+    </div>
+  );
+}
+
 export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConnectFacebook, onRefreshed }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -175,7 +234,14 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConne
                       {s.how.map((line, idx) => <li key={idx}>{line}</li>)}
                     </ol>
                   )}
-                  {s.action && s.status !== 'done' && (
+                  {s.action && s.status !== 'done' && isMobileDevice() && /pages\/creat/.test(s.action.url || '') && (
+                    <MobilePageCard
+                      url={s.action.url}
+                      checking={busyKey === s.key}
+                      onCheck={async () => { setBusyKey(s.key); await refresh(); setBusyKey(''); }}
+                    />
+                  )}
+                  {s.action && s.status !== 'done' && !(isMobileDevice() && /pages\/creat/.test(s.action.url || '')) && (
                     <button
                       className="btn primary"
                       onClick={() => runAction(s)}
