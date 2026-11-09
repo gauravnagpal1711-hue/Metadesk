@@ -23,6 +23,7 @@ export default function LocationPicker({ value, onChange }) {
 
   const [savedShop, setSavedShop] = useState(null);
   const [locating, setLocating] = useState(false);
+  const [resolving, setResolving] = useState(false);
   const [error, setError] = useState('');
 
   const { query, setQuery, results, loading } = useTypeahead('/meta/geo');
@@ -48,9 +49,30 @@ export default function LocationPicker({ value, onChange }) {
     );
   }
 
-  function pickPin(g) {
-    if (g.latitude == null || g.longitude == null) { setError('That place has no exact point — pick a city below instead.'); return; }
-    set({ mode: 'nearby', center: { lat: g.latitude, lng: g.longitude, label: g.name } });
+  async function pickPin(g) {
+    let lat = g.latitude;
+    let lng = g.longitude;
+    // Meta lists PIN codes without coordinates; look the point up ourselves.
+    if (lat == null || lng == null) {
+      setError('');
+      setResolving(true);
+      try {
+        const p = new URLSearchParams();
+        if (g.type === 'zip') p.set('postalcode', g.name);
+        else p.set('q', [g.name, g.region].filter(Boolean).join(', '));
+        if (g.country_code) p.set('country', g.country_code);
+        const found = await api.get(`/meta/geocode?${p}`);
+        lat = found?.latitude ?? null;
+        lng = found?.longitude ?? null;
+      } catch { /* handled below */ }
+      setResolving(false);
+    }
+    if (lat == null || lng == null) {
+      setError('Could not find that place on the map. Try a nearby PIN code, or use “Use my current location”.');
+      return;
+    }
+    const label = g.type === 'zip' && g.primary_city ? `${g.name}, ${g.primary_city}` : g.name;
+    set({ mode: 'nearby', center: { lat, lng, label } });
     setQuery('');
     setOpen(false);
   }
@@ -99,6 +121,7 @@ export default function LocationPicker({ value, onChange }) {
               />
               {open && query.trim().length >= 3 && (
                 <div className="dropdown-pop" style={{ left: 0, right: 0, maxHeight: 200, overflowY: 'auto' }}>
+                  {resolving && <div className="empty-mini">Finding that place on the map…</div>}
                   {loading && <div className="empty-mini">Searching…</div>}
                   {!loading && results.length === 0 && <div className="empty-mini">No match.</div>}
                   {results.map((g) => (

@@ -484,8 +484,79 @@ export async function listLeadForms(conn, pageId) {
 
 /* ---------- in-app campaign builder helpers ---------- */
 
+/* Meta's location search returns PIN codes (type "zip") with NO coordinates, but
+   the ad is targeted as "a radius around a point" — so a PIN is useless until we
+   know where it is. OpenStreetMap's Nominatim turns it into lat/lng. Its usage
+   policy asks for a descriptive User-Agent and at most 1 request/second, so calls
+   are queued ~1.1 s apart and successful lookups are cached. */
+const geocodeCache = new Map();
+let geocodeChain = Promise.resolve();
+
+function nominatim(params) {
+  const run = async () => {
+    const url = 'https://nominatim.openstreetmap.org/search?' + new URLSearchParams({
+      format: 'jsonv2', limit: '1', addressdetails: '1', ...params
+    });
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'AdsDesk/1.0 (PIN code lookup)', 'Accept-Language': 'en' },
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!res.ok) throw new Error(`Geocoder returned ${res.status}`);
+    return res.json();
+  };
+  const result = geocodeChain.then(run);
+  // geocodeChain must never reject, or every later lookup would fail with it.
+  geocodeChain = result.then(() => null, () => null).then(() => new Promise((r) => setTimeout(r, 1100)));
+  return result;
+}
+
+/** { postalcode?, q?, country? } -> { latitude, longitude, city, region, country_code } or null. */
+export async function geocodePlace({ postalcode, q: text, country } = {}) {
+  const cc = /^[a-z]{2}$/i.test(country || '') ? country.toLowerCase() : '';
+  const pc = String(postalcode || '').trim().slice(0, 12);
+  const free = String(text || '').trim().slice(0, 150);
+  if (!pc && !free) return null;
+  const key = `${pc}|${free}|${cc}`;
+  if (geocodeCache.has(key)) return geocodeCache.get(key);
+
+  const params = pc ? { postalcode: pc } : { q: free };
+  if (cc) params.countrycodes = cc;
+  const row = (await nominatim(params))?.[0];
+  if (!row || !row.lat || !row.lon) return null;
+
+  const a = row.address || {};
+  const out = {
+    latitude: Number(row.lat),
+    longitude: Number(row.lon),
+    city: a.city || a.town || a.village || a.state_district || a.county || null,
+    region: a.state || null,
+    country_code: (a.country_code || cc || '').toUpperCase() || null
+  };
+  geocodeCache.set(key, out); // misses and failures are not cached, so a retry can succeed
+  return out;
+}
+
 export async function searchGeo(conn, qStr) {
   if (!qStr || !qStr.trim()) return [];
+  // An Indian PIN code is exactly 6 digits. Resolve it straight to a point — this
+  // is what makes it selectable — and only fall back to Meta's search if that fails.
+  if (/^\d{6}$/.test(qStr.trim())) {
+    try {
+      const g = await geocodePlace({ postalcode: qStr.trim(), country: 'in' });
+      if (g) {
+        return [{
+          key: `IN:${qStr.trim()}`,
+          name: qStr.trim(),
+          type: 'zip',
+          region: g.region,
+          country_code: 'IN',
+          primary_city: g.city,
+          latitude: g.latitude,
+          longitude: g.longitude
+        }];
+      }
+    } catch { /* fall through to Meta's own search */ }
+  }
   const isPin = /^\d{4,10}$/.test(qStr.trim());
   const data = await graph('search', {
     conn,

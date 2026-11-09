@@ -3,6 +3,7 @@ import {
   loadConnection,
   connConfigured,
   searchGeo,
+  geocodePlace,
   searchInterests,
   resolveWhatsappNumber,
   setWhatsappNumber,
@@ -26,6 +27,19 @@ metaTargetingRouter.get('/geo', async (req, res, next) => {
     const conn = await loadConnection(req.user.id);
     if (!connConfigured(conn)) return res.json([]);
     res.json(await searchGeo(conn, req.query.q || ''));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Coordinates for a place Meta's search returned without any (PIN codes always).
+ * No Meta call, so it also works before a Meta connection is complete.
+ */
+metaTargetingRouter.get('/geocode', async (req, res, next) => {
+  try {
+    const { postalcode, q, country } = req.query;
+    res.json((await geocodePlace({ postalcode, q, country })) || {});
   } catch (e) {
     next(e);
   }
