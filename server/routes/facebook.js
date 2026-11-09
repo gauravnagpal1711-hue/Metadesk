@@ -30,6 +30,27 @@ facebookRouter.get('/status', async (req, res, next) => {
   }
 });
 
+// The connected Facebook user's profile picture (DP). Proxied so the access
+// token never reaches the browser; 404 when not connected so the UI can fall
+// back to initials.
+facebookRouter.get('/picture', async (req, res) => {
+  try {
+    const conn = await loadConnection(req.user.id);
+    if (!conn?.accessToken) return res.status(404).end();
+    const v = process.env.META_API_VERSION || 'v21.0';
+    const r = await fetch(
+      `https://graph.facebook.com/${v}/me/picture?type=large&width=200&height=200&access_token=${encodeURIComponent(conn.accessToken)}`
+    );
+    const type = r.headers.get('content-type') || '';
+    if (!r.ok || !type.startsWith('image/')) return res.status(404).end();
+    res.set('Content-Type', type);
+    res.set('Cache-Control', 'private, max-age=3600');
+    res.send(Buffer.from(await r.arrayBuffer()));
+  } catch {
+    res.status(404).end();
+  }
+});
+
 /* ---------- onboarding checklist ---------- */
 
 const FB = 'https://www.facebook.com';
@@ -113,7 +134,7 @@ facebookRouter.get('/onboarding', async (req, res, next) => {
         'Close that window and come back — this list updates on its own.'
       ],
       status: anyPage ? 'done' : 'todo',
-      action: anyPage ? null : { type: 'meta', url: `${FB}/pages/create`, label: 'Create a Page on Meta' }
+      action: anyPage ? null : { type: 'meta', url: `${FB}/pages/creation/?ref_type=universal_creation_hub`, label: 'Create a Page on Meta' }
     });
 
     steps.push({

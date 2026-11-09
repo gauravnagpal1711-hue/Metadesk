@@ -57,9 +57,9 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConne
       let url = a.url;
       // On phones www.facebook.com/pages/create is hijacked (Facebook app / mobile
       // redirect) and lands on the home feed — use the mobile page-creation URL.
-      if (isMobile && /^https:\/\/www\.facebook\.com\/pages\/create\/?$/.test(url)) {
-        url = 'https://m.facebook.com/pages/create/';
-      }
+      // /pages/creation/ is the route Facebook's own "Create" menu uses, which the
+      // app and mobile site both route to the Page-creation flow (not the feed).
+      if (isMobile) url = url.replace('://www.facebook.com/', '://m.facebook.com/');
       // The installed Facebook app claims facebook.com links and opens its home screen.
       // Force the page to open inside the browser instead, so the person's existing
       // web login is used and the exact page loads.
