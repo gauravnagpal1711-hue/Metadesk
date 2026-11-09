@@ -87,37 +87,55 @@ function PageWhatsAppLink({ defaultNumber, onLinked }) {
     }
   }
 
+  // Re-check when the person comes back from Facebook, so the step turns green on its own.
+  useEffect(() => {
+    const onVis = () => { if (document.visibilityState === 'visible') onLinked?.(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [onLinked]);
+
   return (
     <div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 12, background: 'var(--accent-soft-2)', marginTop: 4 }}>
-      {err && <div className="notice bad" style={{ margin: '0 0 8px' }}>{err}</div>}
-      {/pages_manage_metadata|#283/.test(err) && (
-        <div className="notice" style={{ margin: '0 0 8px', fontSize: 13, lineHeight: 1.5 }}>
-          <strong>Do it directly on Facebook instead:</strong> open your Page on Facebook → Settings →
-          Linked accounts → WhatsApp → Connect WhatsApp number, and enter the code Facebook sends to
-          your WhatsApp. Then come back and refresh — this step turns green by itself.
-        </div>
-      )}
-      {msg && <div className="notice" style={{ margin: '0 0 8px' }}>{msg}</div>}
-      <label style={{ fontSize: 12.5, color: 'var(--muted)' }}>WhatsApp number (country code first, digits only)</label>
-      <input className="input num" inputMode="numeric" placeholder="919876543210" value={number}
-        onChange={(e) => setNumber(e.target.value.replace(/[^\d+ ]/g, ''))} style={{ marginBottom: 8 }} />
-      <button className="btn primary" disabled={busy || number.replace(/\D/g, '').length < 8} onClick={() => call(false)}>
-        {busy && !sent ? 'Asking Meta…' : sent ? 'Send code again' : 'Send code'}
+      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 6 }}>Link it on Facebook (about 2 minutes)</div>
+      <ol style={{ margin: '0 0 10px', paddingLeft: 20, fontSize: 13.5, lineHeight: 1.6 }}>
+        <li>Open your Facebook Page (a computer is easiest).</li>
+        <li>Go to <strong>Settings → Linked accounts → WhatsApp → Connect WhatsApp number</strong>.</li>
+        <li>Enter {number ? <strong>+{number.replace(/\D/g, '')}</strong> : 'your WhatsApp number'} and tap Continue.</li>
+        <li>Facebook sends a code to that number on WhatsApp — type it in.</li>
+        <li>Come back here. This step turns green by itself.</li>
+      </ol>
+      <button className="btn primary" onClick={() => onLinked?.()} style={{ width: '100%' }}>
+        ✓ I linked it — check now
       </button>
-      {sent && (
-        <div style={{ marginTop: 10 }}>
-          <label style={{ fontSize: 12.5, color: 'var(--muted)' }}>Code from WhatsApp</label>
-          <input className="input num" inputMode="numeric" placeholder="123456" value={code}
-            onChange={(e) => setCode(e.target.value)} style={{ marginBottom: 8 }} />
-          <button className="btn primary" disabled={busy || !code.trim()} onClick={() => call(true)}>
-            {busy ? 'Checking…' : 'Link number'}
+
+      <details style={{ marginTop: 12 }}>
+        <summary style={{ cursor: 'pointer', fontSize: 12.5, color: 'var(--muted)' }}>
+          Try linking automatically (needs extra Facebook permission)
+        </summary>
+        <div style={{ marginTop: 8 }}>
+          {err && <div className="notice bad" style={{ margin: '0 0 8px' }}>{err}</div>}
+          {msg && <div className="notice" style={{ margin: '0 0 8px' }}>{msg}</div>}
+          <label style={{ fontSize: 12.5, color: 'var(--muted)' }}>WhatsApp number (country code first, digits only)</label>
+          <input className="input num" inputMode="numeric" placeholder="919876543210" value={number}
+            onChange={(e) => setNumber(e.target.value.replace(/[^\d+ ]/g, ''))} style={{ marginBottom: 8 }} />
+          <button className="btn" disabled={busy || number.replace(/\D/g, '').length < 8} onClick={() => call(false)}>
+            {busy && !sent ? 'Asking Meta…' : sent ? 'Send code again' : 'Send code'}
           </button>
+          {sent && (
+            <div style={{ marginTop: 10 }}>
+              <label style={{ fontSize: 12.5, color: 'var(--muted)' }}>Code from WhatsApp</label>
+              <input className="input num" inputMode="numeric" placeholder="123456" value={code}
+                onChange={(e) => setCode(e.target.value)} style={{ marginBottom: 8 }} />
+              <button className="btn" disabled={busy || !code.trim()} onClick={() => call(true)}>
+                {busy ? 'Checking…' : 'Link number'}
+              </button>
+            </div>
+          )}
         </div>
-      )}
+      </details>
     </div>
   );
 }
-
 export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConnectFacebook, onRefreshed }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');

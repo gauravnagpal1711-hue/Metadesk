@@ -267,9 +267,9 @@ facebookRouter.get('/onboarding', async (req, res, next) => {
         : 'Required by Meta before a WhatsApp ad can launch.',
       why: 'Meta only lets a "Message you on WhatsApp" ad run if the Facebook Page itself has a WhatsApp number linked. Facebook sends a short code to that number on WhatsApp to confirm it is yours.',
       how: [
-        'Type the WhatsApp number (the one you connected in the WhatsApp tab) and tap "Send code".',
-        'Facebook sends a code to that number — open WhatsApp on that phone and read it.',
-        'Enter the code and tap "Link number". This turns green once Meta confirms it.'
+        'On Facebook open your Page → Settings → Linked accounts → WhatsApp → Connect WhatsApp number.',
+        'Enter the same number you connected in the WhatsApp tab; Facebook sends a code to it on WhatsApp.',
+        'Type the code, then come back here — this turns green once Meta shows the link.'
       ],
       status: pageWa.number ? (pageWaDiffers ? 'warn' : 'done') : 'todo',
       inline: pageWa.number ? null : 'page_whatsapp',
