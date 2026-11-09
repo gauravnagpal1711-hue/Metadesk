@@ -10,7 +10,7 @@ import {
   fetchOnboardingSnapshot,
   fetchAdBalance
 } from '../services/facebookAuth.js';
-import { loadConnection, saveConnection, clearConnection, safeConn, resolveWhatsappNumber } from '../services/meta.js';
+import { loadConnection, saveConnection, clearConnection, safeConn, resolveWhatsappNumber, pageLinkedWhatsapp, pageWhatsappVerify } from '../services/meta.js';
 import { q } from '../db.js';
 import { webPairingAllowed } from '../services/waConnection.js';
 
@@ -253,6 +253,30 @@ facebookRouter.get('/onboarding', async (req, res, next) => {
       action: wa.number ? null : { type: 'app', target: 'whatsapp', label: 'Open WhatsApp tab' }
     });
 
+    // Meta rejects a click-to-WhatsApp ad set unless the Page itself has a WhatsApp
+    // number linked (subcode 2446886). Pairing/typing a number in Ads Desk is not enough.
+    const pageWa = await pageLinkedWhatsapp(req.user.id).catch(() => ({ number: null }));
+    const pageWaDiffers = !!(pageWa.number && wa.number && pageWa.number !== wa.number);
+    steps.push({
+      key: 'page_whatsapp',
+      title: 'Link your WhatsApp number to your Page',
+      oneLiner: pageWa.number
+        ? (pageWaDiffers
+            ? `Your Page is linked to +${pageWa.number}, not +${wa.number}. Leads will message the Page's number.`
+            : `Your Page is linked to +${pageWa.number}.`)
+        : 'Required by Meta before a WhatsApp ad can launch.',
+      why: 'Meta only lets a "Message you on WhatsApp" ad run if the Facebook Page itself has a WhatsApp number linked. Facebook sends a short code to that number on WhatsApp to confirm it is yours.',
+      how: [
+        'Type the WhatsApp number (the one you connected in the WhatsApp tab) and tap "Send code".',
+        'Facebook sends a code to that number — open WhatsApp on that phone and read it.',
+        'Enter the code and tap "Link number". This turns green once Meta confirms it.'
+      ],
+      status: pageWa.number ? (pageWaDiffers ? 'warn' : 'done') : 'todo',
+      inline: pageWa.number ? null : 'page_whatsapp',
+      defaultNumber: wa.number || null,
+      action: null
+    });
+
     // Growth stages: connecting Facebook/WhatsApp is "ready to run ads", but the
     // journey to an actually-running ad continues here. Each is auto-detected
     // from the app's own tables (no Meta round trip needed) and stays visible
@@ -443,6 +467,18 @@ facebookRouter.post('/select', async (req, res, next) => {
       pageToken
     });
     res.json({ ok: true, connection: safeConn(updated) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Link a WhatsApp number to the Page: step 1 sends the code, step 2 submits it. */
+facebookRouter.post('/page-whatsapp', async (req, res, next) => {
+  try {
+    const { number, code } = req.body || {};
+    const digits = String(number || '').replace(/\D/g, '');
+    if (digits.length < 8) return res.status(400).json({ error: 'Enter the WhatsApp number with country code, e.g. 919876543210.' });
+    res.json(await pageWhatsappVerify(req.user.id, { number: digits, code }));
   } catch (e) {
     next(e);
   }

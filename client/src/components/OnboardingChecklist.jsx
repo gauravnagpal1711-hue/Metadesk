@@ -1,11 +1,11 @@
-﻿import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 
 /**
  * Path-A onboarding for a non-technical shopkeeper: one numbered checklist that
  * probes their Meta setup and walks them through each gap. Steps Meta forces
- * onto its own screens (create a Page, add a card) open in a popup â€” the same
- * pattern as the Facebook-login button â€” and the list re-checks itself when the
+ * onto its own screens (create a Page, add a card) open in a popup — the same
+ * pattern as the Facebook-login button — and the list re-checks itself when the
  * popup closes. Each step is collapsed to a title + one line; tap to expand the
  * "why" and the "how".
  */
@@ -56,6 +56,57 @@ function MobilePageCard({ url, onCheck, checking }) {
       <button className="btn" onClick={onCheck} disabled={checking} style={{ width: '100%' }}>
         {checking ? 'Checking…' : '✓ I created my Page'}
       </button>
+    </div>
+  );
+}
+
+/**
+ * Links a WhatsApp number to the Facebook Page (Meta requires this before a
+ * click-to-WhatsApp ad set can be created). Step 1 asks Meta to send a code to the
+ * number on WhatsApp; step 2 submits the code.
+ */
+function PageWhatsAppLink({ defaultNumber, onLinked }) {
+  const [number, setNumber] = useState(defaultNumber || '');
+  const [code, setCode] = useState('');
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+
+  async function call(withCode) {
+    setBusy(true); setErr(''); setMsg('');
+    try {
+      const r = await api.post('/facebook/page-whatsapp', { number, code: withCode ? code : undefined });
+      if (r.linked) { setMsg('Linked!'); await onLinked?.(); }
+      else if (!withCode) { setSent(true); setMsg('Code requested. Open WhatsApp on that phone and enter the code below.'); }
+      else setErr(r.result?.error_message || 'Meta did not confirm the code. Check it and try again.');
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 12, background: 'var(--accent-soft-2)', marginTop: 4 }}>
+      {err && <div className="notice bad" style={{ margin: '0 0 8px' }}>{err}</div>}
+      {msg && <div className="notice" style={{ margin: '0 0 8px' }}>{msg}</div>}
+      <label style={{ fontSize: 12.5, color: 'var(--muted)' }}>WhatsApp number (country code first, digits only)</label>
+      <input className="input num" inputMode="numeric" placeholder="919876543210" value={number}
+        onChange={(e) => setNumber(e.target.value.replace(/[^\d+ ]/g, ''))} style={{ marginBottom: 8 }} />
+      <button className="btn primary" disabled={busy || number.replace(/\D/g, '').length < 8} onClick={() => call(false)}>
+        {busy && !sent ? 'Asking Meta…' : sent ? 'Send code again' : 'Send code'}
+      </button>
+      {sent && (
+        <div style={{ marginTop: 10 }}>
+          <label style={{ fontSize: 12.5, color: 'var(--muted)' }}>Code from WhatsApp</label>
+          <input className="input num" inputMode="numeric" placeholder="123456" value={code}
+            onChange={(e) => setCode(e.target.value)} style={{ marginBottom: 8 }} />
+          <button className="btn primary" disabled={busy || !code.trim()} onClick={() => call(true)}>
+            {busy ? 'Checking…' : 'Link number'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -143,7 +194,7 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConne
         <h2 style={{ margin: 0 }}>Your growth checklist</h2>
         <span className={`pill-status ${allDone ? 'good' : data.ready ? 'good' : ''}`} style={{ marginLeft: 'auto' }}>
           <span className="dot" />
-          {allDone ? 'Your ad is live' : data.ready ? `Connected â€” ${doneCount} of ${steps.length} done` : `${doneCount} of ${steps.length} done`}
+          {allDone ? 'Your ad is live' : data.ready ? `Connected — ${doneCount} of ${steps.length} done` : `${doneCount} of ${steps.length} done`}
         </span>
       </div>
       <div style={{ height: 6, borderRadius: 999, background: 'var(--line)', overflow: 'hidden', margin: '10px 0' }}>
@@ -154,7 +205,7 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConne
       </div>
       <p style={{ color: 'var(--muted)', margin: '4px 0 12px', fontSize: 13 }}>
         Every step here either happens inside Ads Desk, or opens Meta for the one screen only Facebook can
-        show you â€” finish there, close it, and this list ticks itself off automatically.
+        show you — finish there, close it, and this list ticks itself off automatically.
       </p>
 
       {error && <div className="notice bad">{error}</div>}
@@ -162,7 +213,7 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConne
       <div style={{ border: '1px solid var(--line)', borderRadius: 10, overflow: 'hidden' }}>
         {steps.map((s, i) => {
           const isOpen = openKey === s.key;
-          const badge = s.status === 'done' ? 'âœ“' : s.status === 'warn' ? '!' : String(i + 1);
+          const badge = s.status === 'done' ? '✓' : s.status === 'warn' ? '!' : String(i + 1);
           const badgeBg = s.status === 'done' ? 'var(--good)' : s.status === 'warn' ? 'var(--warn)' : 'var(--accent)';
           return (
             <div key={s.key} style={{ borderTop: i ? '1px solid var(--line)' : 'none' }}>
@@ -212,7 +263,7 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConne
                   flex: '0 0 auto', color: 'var(--muted-2)', fontSize: 12,
                   transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s'
                 }}>
-                  â–¶
+                  ▶
                 </span>
               </button>
 
@@ -225,6 +276,9 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConne
                     <ol style={{ margin: '0 0 12px', paddingLeft: 18, fontSize: 13, lineHeight: 1.55 }}>
                       {s.how.map((line, idx) => <li key={idx}>{line}</li>)}
                     </ol>
+                  )}
+                  {s.inline === 'page_whatsapp' && (
+                    <PageWhatsAppLink defaultNumber={s.defaultNumber} onLinked={refresh} />
                   )}
                   {s.action && s.status !== 'done' && isMobileDevice() && /pages\/creat/.test(s.action.url || '') && (
                     <MobilePageCard
@@ -240,9 +294,9 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConne
                       disabled={busyKey === s.key}
                     >
                       {busyKey === s.key
-                        ? 'Waiting â€” finish in the Facebook windowâ€¦'
+                        ? 'Waiting — finish in the Facebook window…'
                         : s.action.type === 'meta'
-                          ? `${s.action.label}  â†—`
+                          ? `${s.action.label}  ↗`
                           : s.action.label}
                     </button>
                   )}

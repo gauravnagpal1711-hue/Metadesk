@@ -593,6 +593,47 @@ export async function resolveWhatsappNumber(userId) {
   return { number: null, source: null, manual: false };
 }
 
+/**
+ * The WhatsApp number actually linked to the user's Facebook Page on Meta's side.
+ * Meta refuses to create a click-to-WhatsApp ad set unless the Page has one
+ * ("Your Page is not linked to a WhatsApp account", subcode 2446886) — a number
+ * typed or paired inside Ads Desk does not count.
+ */
+export async function pageLinkedWhatsapp(userId) {
+  const conn = await loadConnection(userId).catch(() => null);
+  if (!conn?.pageId) return { number: null, noPage: true };
+  try {
+    const p = await graph(`${conn.pageId}`, {
+      conn,
+      params: { fields: 'connected_whatsapp_number,whatsapp_number' },
+      token: conn.pageToken || undefined
+    });
+    const n = p.connected_whatsapp_number || p.whatsapp_number;
+    return { number: n ? String(n).replace(/\D/g, '') : null };
+  } catch (e) {
+    return { number: null, error: e.message };
+  }
+}
+
+/**
+ * Link a WhatsApp number to the Page through Meta's Page WhatsApp-number
+ * verification edge. Call without `code` to make Meta send the verification code
+ * to that WhatsApp number; call again with the `code` to finish linking.
+ */
+export async function pageWhatsappVerify(userId, { number, code }) {
+  const conn = await loadConnection(userId);
+  if (!conn?.pageId) throw new Error('Choose your Facebook Page first (Facebook tab).');
+  const form = { whatsapp_number: String(number || '').replace(/\D/g, '') };
+  if (code) form.verification_code = String(code).trim();
+  const result = await graph(`${conn.pageId}/page_whatsapp_number_verification`, {
+    conn,
+    method: 'POST',
+    form,
+    token: conn.pageToken || undefined
+  });
+  return { result, linked: (await pageLinkedWhatsapp(userId)).number };
+}
+
 export async function setWhatsappNumber(userId, raw) {
   const digits = String(raw || '').replace(/\D/g, '');
   await setSetting(userId, WA_SETTING_KEY, digits || null);
