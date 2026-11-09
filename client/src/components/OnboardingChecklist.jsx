@@ -14,57 +14,46 @@ function isMobileDevice() {
 }
 
 /**
- * Phone version of "Create a Facebook Page". The Facebook app grabs every facebook.com
- * link tapped on a page and shows its home feed, but a link PASTED into the browser's
- * address bar is not intercepted. So: a copy button for the link, then plain steps.
- * The list re-checks when the person comes back to this tab.
+ * Phone version of "Create a Facebook Page". If the Facebook app is installed, it grabs
+ * every facebook.com link and shows its home feed instead of the Page-creation form.
+ * (A web page cannot detect whether the app is installed.) With the app removed the
+ * link opens in the browser and works, so the button is unlocked only after the person
+ * confirms the app is deleted. The list re-checks when they come back to this tab.
  */
 function MobilePageCard({ url, onCheck, checking }) {
-  const [copied, setCopied] = useState(false);
-  const steps = [
-    'Tap "Copy link" above.',
-    'Open your phone\'s browser (Chrome or Safari) — not the Facebook app.',
-    'Tap the address bar at the top, paste the link, and press Go.',
-    'Log in to Facebook if it asks, then type your business name and pick a category.',
-    'Tap "Create Page", then come back here and tap "I created my Page".'
-  ];
+  const [removed, setRemoved] = useState(false);
   // Re-check automatically when the person comes back from the browser.
   useEffect(() => {
     const onVis = () => { if (document.visibilityState === 'visible') onCheck(); };
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [onCheck]);
-  async function copy() {
-    try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 3000); }
-    catch { window.prompt('Copy this link:', url); }
-  }
   return (
     <div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 12, background: 'var(--accent-soft-2)' }}>
-      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>Link to create your Facebook Page</div>
-      <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 8 }}>
-        Try one tap first — if it opens the Facebook home feed instead, use the copy &amp; paste below.
+      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>Create your Facebook Page</div>
+      <div className="notice bad" style={{ marginBottom: 10, fontSize: 13.5, lineHeight: 1.5 }}>
+        <strong>First: delete the Facebook app from your phone.</strong> If the Facebook app is installed,
+        it hijacks this link and shows its home page instead of Page creation. Uninstall it now
+        (press and hold the Facebook icon, then Uninstall / Remove App). You can reinstall it
+        later, after your Page is created.
       </div>
-      <a className="btn primary" href={url} target="_blank" rel="noopener noreferrer"
-        style={{ display: 'block', textAlign: 'center', textDecoration: 'none', marginBottom: 8 }}>
-        Option A · Open page creation ↗
+      <label style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 14, marginBottom: 10 }}>
+        <input type="checkbox" checked={removed} onChange={(e) => setRemoved(e.target.checked)}
+          style={{ width: 20, height: 20 }} />
+        I have deleted the Facebook app (or don't have it)
+      </label>
+      <a className={`btn primary${removed ? '' : ' disabled'}`}
+        href={removed ? url : undefined} target="_blank" rel="noopener noreferrer"
+        aria-disabled={!removed}
+        onClick={(e) => { if (!removed) e.preventDefault(); }}
+        style={{ display: 'block', textAlign: 'center', textDecoration: 'none', opacity: removed ? 1 : 0.45 }}>
+        Create Facebook Page ↗
       </a>
-      <a className="btn" href="fb://page_creation"
-        style={{ display: 'block', textAlign: 'center', textDecoration: 'none', marginBottom: 12 }}>
-        Option B · Open in Facebook app ↗
-      </a>
-      <input
-        readOnly
-        value={url}
-        onFocus={(e) => e.target.select()}
-        style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: 13, border: '1px solid var(--line)', borderRadius: 8 }}
-      />
-      <button className="btn primary" onClick={copy} style={{ width: '100%', marginTop: 8 }}>
-        {copied ? '✓ Copied — now paste it in your browser' : 'Copy link'}
-      </button>
-      <ol style={{ margin: '12px 0 0', paddingLeft: 20, fontSize: 13.5, lineHeight: 1.6 }}>
-        {steps.map((t, i) => <li key={i}>{t}</li>)}
-      </ol>
-      <button className="btn" onClick={onCheck} disabled={checking} style={{ width: '100%', marginTop: 12 }}>
+      <div style={{ fontSize: 12.5, color: 'var(--muted)', margin: '10px 0' }}>
+        Log in to Facebook in the browser if it asks, type your business name, pick a category and tap
+        "Create Page". Then come back here. You can reinstall the Facebook app afterwards.
+      </div>
+      <button className="btn" onClick={onCheck} disabled={checking} style={{ width: '100%' }}>
         {checking ? 'Checking…' : '✓ I created my Page'}
       </button>
     </div>
