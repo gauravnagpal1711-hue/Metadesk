@@ -64,13 +64,14 @@ export async function verifyTokenMatches(token) {
   return rows.length > 0;
 }
 
-/** WhatsApp Web (Baileys) automates the consumer WhatsApp app outside the
- *  official Business Platform, so it stays limited to the original
- *  single-tenant owner (the first user), who already relies on it. Every other
- *  tenant gets the Cloud API only. */
+/** WhatsApp Web (Baileys) pairing — QR code or phone-number code — is open to
+ *  every tenant (product decision 2026-11-09: Unipile-style linking). It
+ *  automates the consumer WhatsApp app outside the official Business Platform,
+ *  which is against WhatsApp's Business Terms, so accounts can be banned and it
+ *  may be an issue for Meta App Review. To restrict it again, compare userId
+ *  with the first user's id here. */
 export async function webPairingAllowed(userId) {
-  const firstU = (await q('SELECT id FROM users ORDER BY id LIMIT 1')).rows[0];
-  return !!firstU && firstU.id === userId;
+  return !!userId;
 }
 
 /** User ids that should have a Baileys socket started on boot. */

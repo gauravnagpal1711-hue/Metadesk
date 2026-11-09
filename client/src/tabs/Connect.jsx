@@ -1,20 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { useValidation } from '../useValidation.js';
+
+// On a phone you can't scan a QR shown on the same screen, so default to the
+// phone-number code there.
+const isPhone = () => /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.matchMedia('(max-width: 820px)').matches;
 
 export default function Connect({ onConnectionChange }) {
   const [status, setStatus] = useState(null);
-  const [settings, setSettings] = useState({ onlyExistingLeads: false, adGreetingPatterns: [] });
+  const [settings, setSettings] = useState({ adGreetingPatterns: [] });
   const [patternsDraft, setPatternsDraft] = useState('');
   const [savingPatterns, setSavingPatterns] = useState(false);
-  const [cloud, setCloud] = useState(null); // { phoneNumberId, verifyToken, hasToken, webhookUrl }
-  const [cloudDraft, setCloudDraft] = useState({ phoneNumberId: '', token: '', verifyToken: '' });
-  const [savingCloud, setSavingCloud] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [pairMethod, setPairMethod] = useState('qr'); // 'qr' | 'phone'
+  const [pairMethod, setPairMethod] = useState(isPhone() ? 'phone' : 'qr'); // 'qr' | 'phone'
   const [phoneInput, setPhoneInput] = useState('');
-  const vc = useValidation(); // Cloud API details form
   const poll = useRef(null);
 
   async function refresh() {
@@ -31,10 +30,6 @@ export default function Connect({ onConnectionChange }) {
     api.get('/whatsapp/settings').then((s) => {
       setSettings(s);
       setPatternsDraft((s.adGreetingPatterns || []).join('\n'));
-    }).catch(() => {});
-    api.get('/whatsapp/cloud').then((c) => {
-      setCloud(c);
-      setCloudDraft({ phoneNumberId: c.phoneNumberId || '', token: '', verifyToken: c.verifyToken || '' });
     }).catch(() => {});
     poll.current = setInterval(refresh, 3000);
     return () => clearInterval(poll.current);
@@ -79,49 +74,6 @@ export default function Connect({ onConnectionChange }) {
     }
   }
 
-  async function toggleOnlyExisting() {
-    const next = !settings.onlyExistingLeads;
-    setSettings((s) => ({ ...s, onlyExistingLeads: next }));
-    try {
-      await api.patch('/whatsapp/settings', { onlyExistingLeads: next });
-    } catch (e) {
-      setSettings((s) => ({ ...s, onlyExistingLeads: !next }));
-      setError(e.message);
-    }
-  }
-
-  async function saveCloud() {
-    if (!vc.check({
-      phoneNumberId: { value: cloudDraft.phoneNumberId, label: 'Phone number ID' },
-      verifyToken: { value: cloudDraft.verifyToken, label: 'Verify token' },
-      token: { value: cloudDraft.token, label: 'Access token', validate: (t) => !!t.trim() || !!cloud?.hasToken }
-    })) return;
-    setSavingCloud(true);
-    setError('');
-    try {
-      const body = {
-        phoneNumberId: cloudDraft.phoneNumberId.trim(),
-        verifyToken: cloudDraft.verifyToken.trim()
-      };
-      if (cloudDraft.token.trim()) body.token = cloudDraft.token.trim();
-      const updated = await api.patch('/whatsapp/cloud', body);
-      setCloud((c) => ({ ...(c || {}), ...updated }));
-      setCloudDraft((d) => ({ ...d, token: '' }));
-      await refresh();
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setSavingCloud(false);
-    }
-  }
-
-  function genVerifyToken() {
-    setCloudDraft((d) => ({
-      ...d,
-      verifyToken: (Math.random().toString(36) + Math.random().toString(36)).replace(/[^a-z0-9]/g, '').slice(0, 24)
-    }));
-  }
-
   async function savePatterns() {
     setSavingPatterns(true);
     setError('');
@@ -138,221 +90,105 @@ export default function Connect({ onConnectionChange }) {
 
   if (!status) return null;
   const web = status.web || {};
-  const origin = window.location.origin;
   const waStatus = web.status === 'connected' ? 'good' : web.status === 'pairing' ? 'warn' : '';
-  // WhatsApp Web (Baileys) automates the consumer WhatsApp app outside its
-  // official Business Platform, which is against WhatsApp's Business Terms.
-  // The server only allows it for the account that already relies on it in
-  // production, instead of every new tenant (or a Meta App Review tester).
-  const showWebPairing = !!status.webAllowed;
 
   return (
     <>
       {error && <div className="notice bad">{error}</div>}
 
-      <div className={showWebPairing ? 'grid2' : ''}>
-        {showWebPairing && (
-        <div className="card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <h2 style={{ margin: 0 }}>Pair WhatsApp Web</h2>
-            <span className={`pill-status ${waStatus}`} style={{ marginLeft: 'auto' }}>
-              <span className="dot" />{web.status === 'connected' ? 'Connected' : web.status === 'pairing' ? 'Waiting to link' : 'Not connected'}
-            </span>
-          </div>
-
-          {web.status !== 'connected' && (
-            <div className="provider-row" style={{ marginTop: 12, gap: 6 }}>
-              <button
-                type="button"
-                className={`btn sm ${pairMethod === 'qr' ? 'primary' : ''}`}
-                onClick={() => setPairMethod('qr')}
-              >
-                Scan QR
-              </button>
-              <button
-                type="button"
-                className={`btn sm ${pairMethod === 'phone' ? 'primary' : ''}`}
-                onClick={() => setPairMethod('phone')}
-              >
-                Enter phone number
-              </button>
-            </div>
-          )}
-
-          {web.status === 'connected' ? (
-            <div style={{ marginTop: 16 }}>Linked as {web.me || 'this number'}.</div>
-          ) : pairMethod === 'qr' ? (
-            <div style={{ display: 'flex', gap: 16, marginTop: 16, alignItems: 'center' }}>
-              {web.status === 'pairing' && web.qr ? (
-                <div className="qr" style={{ flex: '0 0 152px' }}>
-                  <img src={web.qr} alt="Scan this QR code with WhatsApp" />
-                </div>
-              ) : (
-                <div className="qr" style={{ flex: '0 0 152px', color: 'var(--muted-2)', fontSize: 12 }}>
-                  No code yet
-                </div>
-              )}
-              <ol className="steps">
-                <li>Open WhatsApp on the ad phone.</li>
-                <li>Settings → Linked devices → Link a device.</li>
-                <li>Scan this code. It refreshes automatically.</li>
-              </ol>
-            </div>
-          ) : (
-            <div style={{ marginTop: 16 }}>
-              {web.status === 'pairing' && web.pairingCode ? (
-                <>
-                  <div style={{
-                    fontFamily: 'var(--mono)', fontSize: 28, fontWeight: 700, letterSpacing: 2,
-                    textAlign: 'center', padding: '14px 0', background: 'var(--accent-soft)', borderRadius: 10
-                  }}>
-                    {formatPairingCode(web.pairingCode)}
-                  </div>
-                  <ol className="steps" style={{ marginTop: 12 }}>
-                    <li>Open WhatsApp on the ad phone.</li>
-                    <li>Settings → Linked devices → Link a device → "Link with phone number instead".</li>
-                    <li>Type this code. It expires after a couple of minutes.</li>
-                  </ol>
-                </>
-              ) : (
-                <>
-                  <div className="field">
-                    <label htmlFor="wapn">Phone number to link (with country code)</label>
-                    <input
-                      id="wapn"
-                      className="input num"
-                      placeholder="e.g. 919876543210"
-                      value={phoneInput}
-                      onChange={(e) => setPhoneInput(e.target.value)}
-                    />
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          <div style={{ marginTop: 14 }}>
-            {web.status === 'connected' ? (
-              <button className="btn danger" onClick={disconnect} disabled={busy}>Unlink this number</button>
-            ) : pairMethod === 'qr' ? (
-              <button className="btn primary" onClick={() => connect()} disabled={busy}>
-                {busy ? 'Starting…' : web.qr ? 'Refresh code' : 'Start pairing'}
-              </button>
-            ) : (
-              <button className="btn primary" onClick={connectWithPhone} disabled={busy}>
-                {busy ? 'Requesting…' : web.pairingCode ? 'Request a new code' : 'Get pairing code'}
-              </button>
-            )}
-          </div>
-
-          {web.error && <div className="notice bad" style={{ marginTop: 14 }}>{web.error}</div>}
-
-          <div className="notice" style={{ marginTop: 16 }}>
-            Sessions are stored in <code>{web.sessionDir}</code>. Attach a Railway volume at that path,
-            or you will re-link after every deploy.
-          </div>
+      <div className="card" style={{ maxWidth: 640 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <h2 style={{ margin: 0 }}>Connect WhatsApp</h2>
+          <span className={`pill-status ${waStatus}`} style={{ marginLeft: 'auto' }}>
+            <span className="dot" />{web.status === 'connected' ? 'Connected' : web.status === 'pairing' ? 'Waiting to link' : 'Not connected'}
+          </span>
         </div>
-        )}
 
-        <div className="card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-            <h2 style={{ margin: 0 }}>Cloud API</h2>
-            <span className={`pill-status ${status.cloud.connected ? 'good' : ''}`} style={{ marginLeft: 'auto' }}>
-              <span className="dot" />{status.cloud.connected ? 'Connected' : 'Not connected'}
-            </span>
-          </div>
-          <p style={{ color: 'var(--muted)', marginTop: 8, fontSize: 12.5 }}>
-            {showWebPairing ? 'Alternative to QR pairing — your own ' : 'Connect your own '}
-            WhatsApp Business number via Meta&apos;s Cloud API.
-            Enter the credentials from Meta for Developers below; nothing goes in Railway.
-          </p>
-
-          {cloud?.profile && (
-            <div className="notice" style={{ margin: '10px 0 0' }}>
-              <strong>{cloud.profile.verifiedName || 'Business name pending verification'}</strong>
-              {cloud.profile.displayPhoneNumber && <> · {cloud.profile.displayPhoneNumber}</>}
-              {cloud.profile.qualityRating && (
-                <span style={{ marginLeft: 8, color: 'var(--muted-2)' }}>
-                  Quality: {cloud.profile.qualityRating}
-                </span>
-              )}
-            </div>
-          )}
-
-          <div className="field" style={{ marginTop: 14 }}>
-            <label htmlFor="cb">Callback URL (paste into Meta)</label>
-            <input id="cb" className="input num" readOnly onFocus={(e) => e.target.select()}
-              value={`${origin}${cloud?.webhookUrl || status.cloud.webhookPath}`} />
-          </div>
-
-          {vc.message && <div className="notice bad">{vc.message}</div>}
-
-          <div className={vc.fieldCls('phoneNumberId')}>
-            <label htmlFor="wpn">Phone number ID</label>
-            <input id="wpn" className={vc.cls('phoneNumberId', 'input num')} placeholder="e.g. 1036363452890512"
-              value={cloudDraft.phoneNumberId}
-              onChange={(e) => { setCloudDraft((d) => ({ ...d, phoneNumberId: e.target.value })); vc.clear('phoneNumberId'); }} />
-          </div>
-
-          <div className={vc.fieldCls('token')}>
-            <label htmlFor="wtok">Access token</label>
-            <input id="wtok" className={vc.cls('token', 'input num')} type="password"
-              placeholder={cloud?.hasToken ? '•••••••• saved — leave blank to keep' : 'Permanent token from Meta'}
-              value={cloudDraft.token}
-              onChange={(e) => { setCloudDraft((d) => ({ ...d, token: e.target.value })); vc.clear('token'); }} />
-          </div>
-
-          <div className={vc.fieldCls('verifyToken')}>
-            <label htmlFor="wvt">Verify token (paste into Meta)</label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input id="wvt" className={vc.cls('verifyToken', 'input num')} style={{ flex: 1 }}
-                value={cloudDraft.verifyToken}
-                onChange={(e) => { setCloudDraft((d) => ({ ...d, verifyToken: e.target.value })); vc.clear('verifyToken'); }} />
-              <button type="button" className="btn sm" onClick={genVerifyToken}>Generate</button>
-            </div>
-          </div>
-
-          <button className="btn primary" onClick={saveCloud} disabled={savingCloud}>
-            {savingCloud ? 'Saving…' : 'Save Cloud API details'}
-          </button>
-
-          <div className="provider-row" style={{ marginTop: 16 }}>
-            <span style={{ fontSize: 12.5, color: 'var(--muted-3)' }}>Only message existing leads</span>
-            <button
-              type="button"
-              className={`toggle ${settings.onlyExistingLeads ? 'on' : ''}`}
-              style={{ marginLeft: 'auto' }}
-              onClick={toggleOnlyExisting}
-              aria-pressed={settings.onlyExistingLeads}
-            >
-              <span />
+        {web.status !== 'connected' && (
+          <div className="provider-row" style={{ marginTop: 12, gap: 6 }}>
+            <button type="button" className={`btn sm ${pairMethod === 'qr' ? 'primary' : ''}`} onClick={() => setPairMethod('qr')}>
+              Scan QR code
+            </button>
+            <button type="button" className={`btn sm ${pairMethod === 'phone' ? 'primary' : ''}`} onClick={() => setPairMethod('phone')}>
+              Use phone number
             </button>
           </div>
+        )}
 
-          <ol className="steps" style={{ marginTop: 16 }}>
-            <li>In Meta for Developers, open your app → WhatsApp → API Setup — copy the Phone number ID and a permanent access token.</li>
-            <li>Save them here, then in WhatsApp → Configuration paste the callback URL and verify token above and subscribe to the <code>messages</code> field.</li>
-          </ol>
+        {web.status === 'connected' ? (
+          <div style={{ marginTop: 16 }}>Linked as {web.me || 'this number'}.</div>
+        ) : pairMethod === 'qr' ? (
+          <div style={{ display: 'flex', gap: 16, marginTop: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+            {web.status === 'pairing' && web.qr ? (
+              <div className="qr" style={{ flex: '0 0 152px' }}>
+                <img src={web.qr} alt="Scan this QR code with WhatsApp" />
+              </div>
+            ) : (
+              <div className="qr" style={{ flex: '0 0 152px', color: 'var(--muted-2)', fontSize: 12 }}>
+                No code yet
+              </div>
+            )}
+            <ol className="steps" style={{ flex: 1, minWidth: 200 }}>
+              <li>Tap "Start pairing" to show the code.</li>
+              <li>On your business phone open WhatsApp → Settings → Linked devices → Link a device.</li>
+              <li>Scan this code. It refreshes automatically.</li>
+            </ol>
+          </div>
+        ) : (
+          <div style={{ marginTop: 16 }}>
+            {web.status === 'pairing' && web.pairingCode ? (
+              <>
+                <div style={{
+                  fontFamily: 'var(--mono)', fontSize: 28, fontWeight: 700, letterSpacing: 2,
+                  textAlign: 'center', padding: '14px 0', background: 'var(--accent-soft)', borderRadius: 10
+                }}>
+                  {formatPairingCode(web.pairingCode)}
+                </div>
+                <ol className="steps" style={{ marginTop: 12 }}>
+                  <li>Open WhatsApp on your business phone.</li>
+                  <li>Settings → Linked devices → Link a device → "Link with phone number instead".</li>
+                  <li>Type this code. It expires after a couple of minutes.</li>
+                </ol>
+              </>
+            ) : (
+              <div className="field">
+                <label htmlFor="wapn">Your WhatsApp number (with country code)</label>
+                <input
+                  id="wapn"
+                  className="input num"
+                  inputMode="numeric"
+                  placeholder="e.g. 919876543210"
+                  value={phoneInput}
+                  onChange={(e) => setPhoneInput(e.target.value)}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        <div style={{ marginTop: 14 }}>
+          {web.status === 'connected' ? (
+            <button className="btn danger" onClick={disconnect} disabled={busy}>Unlink this number</button>
+          ) : pairMethod === 'qr' ? (
+            <button className="btn primary" onClick={() => connect()} disabled={busy}>
+              {busy ? 'Starting…' : web.qr ? 'Refresh code' : 'Start pairing'}
+            </button>
+          ) : (
+            <button className="btn primary" onClick={connectWithPhone} disabled={busy}>
+              {busy ? 'Requesting…' : web.pairingCode ? 'Request a new code' : 'Get pairing code'}
+            </button>
+          )}
         </div>
+
+        {web.error && <div className="notice bad" style={{ marginTop: 14 }}>{web.error}</div>}
       </div>
 
-      <div className="card" style={{ marginTop: 20 }}>
-        <h2>What happens after connecting</h2>
-        <p style={{ color: 'var(--muted)', margin: 0, fontSize: 13 }}>
-          Every incoming message is matched to a lead by phone number. For campaigns with an Instant Form,
-          the lead already exists from the Meta sync, so the message just attaches to it. For click-to-WhatsApp
-          campaigns with no form, a new lead is only created when the first message looks like a real ad
-          click — see below. Anything else is queued, not turned into a lead, until it matches one.
-        </p>
-      </div>
-
-      <div className="card" style={{ marginTop: 20 }}>
-        <h2>Ad-click greetings</h2>
-        <p style={{ color: 'var(--muted)', marginTop: 0, fontSize: 13 }}>
-          Meta prefills a message when someone taps a click-to-WhatsApp ad — the exact wording is whatever
-          you set in that ad's message template. List each variant you use (one per line, case-insensitive,
-          partial match) so a first message matching one of these creates a lead. Anything else from an
-          unknown number is queued instead of becoming a lead.
+      <details className="card" style={{ marginTop: 20, maxWidth: 640 }}>
+        <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Advanced: ad-click greetings</summary>
+        <p style={{ color: 'var(--muted)', fontSize: 13 }}>
+          Meta prefills a message when someone taps a click-to-WhatsApp ad. List each variant you use (one per
+          line, case-insensitive, partial match) so a first message matching one of these creates a lead.
+          Anything else from an unknown number is queued instead of becoming a lead.
         </p>
         <textarea
           className="textarea"
@@ -364,7 +200,7 @@ export default function Connect({ onConnectionChange }) {
         <button className="btn primary" style={{ marginTop: 10 }} onClick={savePatterns} disabled={savingPatterns}>
           {savingPatterns ? 'Saving…' : 'Save greeting patterns'}
         </button>
-      </div>
+      </details>
     </>
   );
 }

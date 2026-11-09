@@ -245,7 +245,7 @@ facebookRouter.get('/onboarding', async (req, res, next) => {
       how: [
         'Open the WhatsApp tab (button below).',
         webAllowed
-          ? 'Scan the QR code with the phone that has your business number — or enter your WhatsApp Cloud API details.'
+          ? 'Scan the QR code with the phone that has your business number — or type your number to get a pairing code.'
           : 'Enter your WhatsApp Cloud API details (Phone number ID and access token from Meta for Developers).',
         'Come back here — this turns green once it is linked.'
       ],
