@@ -134,7 +134,7 @@ facebookRouter.get('/onboarding', async (req, res, next) => {
         'Close that window and come back — this list updates on its own.'
       ],
       status: anyPage ? 'done' : 'todo',
-      action: anyPage ? null : { type: 'meta', url: `${FB}/pages/creation/?ref_type=universal_creation_hub`, label: 'Create a Page on Meta' }
+      action: anyPage ? null : { type: 'meta', url: `${FB}/pages/create/`, label: 'Create a Page on Meta' }
     });
 
     steps.push({
