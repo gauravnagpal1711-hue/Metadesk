@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+﻿import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 
 /**
  * Path-A onboarding for a non-technical shopkeeper: one numbered checklist that
  * probes their Meta setup and walks them through each gap. Steps Meta forces
- * onto its own screens (create a Page, add a card) open in a popup — the same
- * pattern as the Facebook-login button — and the list re-checks itself when the
+ * onto its own screens (create a Page, add a card) open in a popup â€” the same
+ * pattern as the Facebook-login button â€” and the list re-checks itself when the
  * popup closes. Each step is collapsed to a title + one line; tap to expand the
  * "why" and the "how".
  */
@@ -15,54 +15,46 @@ function isMobileDevice() {
 
 /**
  * Phone version of "Create a Facebook Page". The Facebook app grabs every facebook.com
- * link and shows its home feed, so instead of a link we show the 4 taps to do inside
- * the app, plus an easy way to finish on a laptop. The list re-checks on return.
+ * link tapped on a page and shows its home feed, but a link PASTED into the browser's
+ * address bar is not intercepted. So: a copy button for the link, then plain steps.
+ * The list re-checks when the person comes back to this tab.
  */
 function MobilePageCard({ url, onCheck, checking }) {
+  const [copied, setCopied] = useState(false);
   const steps = [
-    ['Open the Facebook app', 'the blue "f" icon on your phone'],
-    ['Tap the menu ☰', 'three lines — bottom right (iPhone) or top right (Android)'],
-    ['Tap "Pages", then "Create"', 'if you don\'t see Pages, tap "See more"'],
-    ['Type your business name and tap "Create Page"', 'pick any category, you can change it later']
+    'Tap "Copy link" above.',
+    'Open your phone\'s browser (Chrome or Safari) — not the Facebook app.',
+    'Tap the address bar at the top, paste the link, and press Go.',
+    'Log in to Facebook if it asks, then type your business name and pick a category.',
+    'Tap "Create Page", then come back here and tap "I created my Page".'
   ];
-  // Re-check automatically when the person comes back from the Facebook app.
+  // Re-check automatically when the person comes back from the browser.
   useEffect(() => {
     const onVis = () => { if (document.visibilityState === 'visible') onCheck(); };
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [onCheck]);
-  async function sendToLaptop() {
-    try {
-      if (navigator.share) { await navigator.share({ title: 'Create my Facebook Page', url }); return; }
-    } catch { return; }
-    try { await navigator.clipboard.writeText(url); alert('Link copied. Paste it in a browser on your laptop.'); } catch { window.prompt('Copy this link:', url); }
+  async function copy() {
+    try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 3000); }
+    catch { window.prompt('Copy this link:', url); }
   }
   return (
     <div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 12, background: 'var(--accent-soft-2)' }}>
-      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>Create your Page in 4 taps</div>
-      {steps.map(([t, sub], i) => (
-        <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 0' }}>
-          <span aria-hidden style={{
-            flex: '0 0 auto', width: 26, height: 26, borderRadius: '50%', background: 'var(--accent)', color: '#fff',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700
-          }}>{i + 1}</span>
-          <span style={{ fontSize: 14, lineHeight: 1.35 }}>
-            <strong>{t}</strong>
-            <span style={{ display: 'block', fontSize: 12.5, color: 'var(--muted)' }}>{sub}</span>
-          </span>
-        </div>
-      ))}
-      <a className="btn primary" href="fb://" style={{ display: 'block', textAlign: 'center', marginTop: 6, textDecoration: 'none' }}>
-        1 · Open Facebook app
-      </a>
-      <button className="btn" onClick={onCheck} disabled={checking} style={{ width: '100%', marginTop: 8 }}>
-        {checking ? 'Checking…' : '✓ I created my Page — check now'}
+      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>Link to create your Facebook Page</div>
+      <input
+        readOnly
+        value={url}
+        onFocus={(e) => e.target.select()}
+        style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', fontSize: 13, border: '1px solid var(--line)', borderRadius: 8 }}
+      />
+      <button className="btn primary" onClick={copy} style={{ width: '100%', marginTop: 8 }}>
+        {copied ? '✓ Copied — now paste it in your browser' : 'Copy link'}
       </button>
-      <button type="button" onClick={sendToLaptop} style={{
-        width: '100%', marginTop: 8, background: 'none', border: 'none', color: 'var(--accent)',
-        fontSize: 13, textDecoration: 'underline', cursor: 'pointer'
-      }}>
-        Easier on a computer? Send me the link
+      <ol style={{ margin: '12px 0 0', paddingLeft: 20, fontSize: 13.5, lineHeight: 1.6 }}>
+        {steps.map((t, i) => <li key={i}>{t}</li>)}
+      </ol>
+      <button className="btn" onClick={onCheck} disabled={checking} style={{ width: '100%', marginTop: 12 }}>
+        {checking ? 'Checking…' : '✓ I created my Page'}
       </button>
     </div>
   );
@@ -151,7 +143,7 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConne
         <h2 style={{ margin: 0 }}>Your growth checklist</h2>
         <span className={`pill-status ${allDone ? 'good' : data.ready ? 'good' : ''}`} style={{ marginLeft: 'auto' }}>
           <span className="dot" />
-          {allDone ? 'Your ad is live' : data.ready ? `Connected — ${doneCount} of ${steps.length} done` : `${doneCount} of ${steps.length} done`}
+          {allDone ? 'Your ad is live' : data.ready ? `Connected â€” ${doneCount} of ${steps.length} done` : `${doneCount} of ${steps.length} done`}
         </span>
       </div>
       <div style={{ height: 6, borderRadius: 999, background: 'var(--line)', overflow: 'hidden', margin: '10px 0' }}>
@@ -162,7 +154,7 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConne
       </div>
       <p style={{ color: 'var(--muted)', margin: '4px 0 12px', fontSize: 13 }}>
         Every step here either happens inside Ads Desk, or opens Meta for the one screen only Facebook can
-        show you — finish there, close it, and this list ticks itself off automatically.
+        show you â€” finish there, close it, and this list ticks itself off automatically.
       </p>
 
       {error && <div className="notice bad">{error}</div>}
@@ -170,7 +162,7 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConne
       <div style={{ border: '1px solid var(--line)', borderRadius: 10, overflow: 'hidden' }}>
         {steps.map((s, i) => {
           const isOpen = openKey === s.key;
-          const badge = s.status === 'done' ? '✓' : s.status === 'warn' ? '!' : String(i + 1);
+          const badge = s.status === 'done' ? 'âœ“' : s.status === 'warn' ? '!' : String(i + 1);
           const badgeBg = s.status === 'done' ? 'var(--good)' : s.status === 'warn' ? 'var(--warn)' : 'var(--accent)';
           return (
             <div key={s.key} style={{ borderTop: i ? '1px solid var(--line)' : 'none' }}>
@@ -220,7 +212,7 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConne
                   flex: '0 0 auto', color: 'var(--muted-2)', fontSize: 12,
                   transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s'
                 }}>
-                  ▶
+                  â–¶
                 </span>
               </button>
 
@@ -248,9 +240,9 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConne
                       disabled={busyKey === s.key}
                     >
                       {busyKey === s.key
-                        ? 'Waiting — finish in the Facebook window…'
+                        ? 'Waiting â€” finish in the Facebook windowâ€¦'
                         : s.action.type === 'meta'
-                          ? `${s.action.label}  ↗`
+                          ? `${s.action.label}  â†—`
                           : s.action.label}
                     </button>
                   )}
