@@ -54,6 +54,9 @@ facebookRouter.get('/picture', async (req, res) => {
 /* ---------- onboarding checklist ---------- */
 
 const FB = 'https://www.facebook.com';
+// Ads Manager links go to the business.facebook.com site so phones open it in the browser
+// instead of handing the link to the Facebook / Ads Manager app.
+const FB_BIZ = 'https://business.facebook.com';
 // account_status: 1 ACTIVE, 2 DISABLED, 3 UNSETTLED, 7 PENDING_RISK_REVIEW,
 // 8 PENDING_SETTLEMENT, 9 IN_GRACE_PERIOD, 100 PENDING_CLOSURE, 101 CLOSED.
 const AD_STATUS_OK = new Set([1, 201]);
@@ -176,7 +179,7 @@ facebookRouter.get('/onboarding', async (req, res, next) => {
       status: !anyAdAccount ? 'todo' : activeAdAccounts.length ? 'done' : 'warn',
       action: anyAdAccount && activeAdAccounts.length
         ? null
-        : { type: 'meta', url: `${FB}/adsmanager/`, label: 'Open Meta Ads Manager' }
+        : { type: 'meta', url: `${FB_BIZ}/adsmanager/manage/campaigns`, label: 'Open Meta Ads Manager' }
     });
 
     steps.push({
@@ -217,8 +220,8 @@ facebookRouter.get('/onboarding', async (req, res, next) => {
         : {
             type: 'meta',
             url: billingActId
-              ? `${FB}/ads/manager/account_settings/account_billing/?act=${billingActId}`
-              : `${FB}/adsmanager/`,
+              ? `${FB_BIZ}/ads/manager/account_settings/account_billing/?act=${billingActId}`
+              : `${FB_BIZ}/adsmanager/manage/campaigns`,
             label: 'Add payment on Meta'
           }
     });
@@ -346,7 +349,7 @@ facebookRouter.get('/billing', async (req, res, next) => {
     const balance = await fetchAdBalance(conn.accessToken, conn.adAccountId);
     res.json({
       ...balance,
-      billingUrl: `${FB}/ads/manager/account_settings/account_billing/?act=${bareActId(conn.adAccountId)}`
+      billingUrl: `${FB_BIZ}/ads/manager/account_settings/account_billing/?act=${bareActId(conn.adAccountId)}`
     });
   } catch (e) {
     next(e);
