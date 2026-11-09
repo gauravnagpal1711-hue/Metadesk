@@ -36,6 +36,19 @@ export default function Connect({ onConnectionChange }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Like Unipile's hosted flow: choosing "Scan QR code" shows the code straight away,
+  // no extra "start" click. Uses a plain connect (no logout) so a saved session that is
+  // still resuming after a deploy is never wiped; the button below does the clean restart.
+  const autoStarted = useRef(false);
+  useEffect(() => { autoStarted.current = false; }, [pairMethod]);
+  useEffect(() => {
+    if (!status || pairMethod !== 'qr' || autoStarted.current) return;
+    if ((status.web?.status || 'disconnected') !== 'disconnected') return;
+    autoStarted.current = true;
+    api.post('/whatsapp/web/connect', {}).then(refresh).catch((e) => setError(e.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, pairMethod]);
+
   async function connect(phoneNumber) {
     setBusy(true);
     setError('');
@@ -53,8 +66,10 @@ export default function Connect({ onConnectionChange }) {
   }
 
   function connectWithPhone() {
-    if (!phoneInput.trim()) { setError('Enter the phone number to link.'); return; }
-    connect(phoneInput.trim());
+    // Same format Unipile asks for: international (E.164) digits only, no "+", spaces or dashes.
+    const digits = phoneInput.replace(/\D/g, '');
+    if (digits.length < 8) { setError('Enter your WhatsApp number with country code, e.g. 919876543210.'); return; }
+    connect(digits);
   }
 
   function formatPairingCode(code) {
@@ -129,7 +144,6 @@ export default function Connect({ onConnectionChange }) {
               </div>
             )}
             <ol className="steps" style={{ flex: 1, minWidth: 200 }}>
-              <li>Tap "Start pairing" to show the code.</li>
               <li>On your business phone open WhatsApp → Settings → Linked devices → Link a device.</li>
               <li>Scan this code. It refreshes automatically.</li>
             </ol>
@@ -152,7 +166,7 @@ export default function Connect({ onConnectionChange }) {
               </>
             ) : (
               <div className="field">
-                <label htmlFor="wapn">Your WhatsApp number (with country code)</label>
+                <label htmlFor="wapn">Your WhatsApp number (country code first, digits only)</label>
                 <input
                   id="wapn"
                   className="input num"
@@ -171,7 +185,7 @@ export default function Connect({ onConnectionChange }) {
             <button className="btn danger" onClick={disconnect} disabled={busy}>Unlink this number</button>
           ) : pairMethod === 'qr' ? (
             <button className="btn primary" onClick={() => connect()} disabled={busy}>
-              {busy ? 'Starting…' : web.qr ? 'Refresh code' : 'Start pairing'}
+              {busy ? 'Starting…' : web.qr ? 'Get a new code' : 'Show QR code'}
             </button>
           ) : (
             <button className="btn primary" onClick={connectWithPhone} disabled={busy}>
