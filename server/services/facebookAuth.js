@@ -24,6 +24,11 @@ const SCOPES = [
     'pages_read_engagement',
     'pages_manage_ads',
     'business_management',
+    // Needed to link a WhatsApp number to the Page from inside the app
+    // (Graph error "(#283) Requires pages_manage_metadata"). Must ALSO be added to
+    // the Login Configuration in Meta for Developers (config_id) — that is what
+    // actually decides the permissions — and users must sign in with Facebook again.
+    'pages_manage_metadata',
   ].join(',');
 
 export function oauthConfigured() {

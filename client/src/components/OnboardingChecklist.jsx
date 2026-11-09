@@ -90,6 +90,13 @@ function PageWhatsAppLink({ defaultNumber, onLinked }) {
   return (
     <div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 12, background: 'var(--accent-soft-2)', marginTop: 4 }}>
       {err && <div className="notice bad" style={{ margin: '0 0 8px' }}>{err}</div>}
+      {/pages_manage_metadata|#283/.test(err) && (
+        <div className="notice" style={{ margin: '0 0 8px', fontSize: 13, lineHeight: 1.5 }}>
+          <strong>Do it directly on Facebook instead:</strong> open your Page on Facebook → Settings →
+          Linked accounts → WhatsApp → Connect WhatsApp number, and enter the code Facebook sends to
+          your WhatsApp. Then come back and refresh — this step turns green by itself.
+        </div>
+      )}
       {msg && <div className="notice" style={{ margin: '0 0 8px' }}>{msg}</div>}
       <label style={{ fontSize: 12.5, color: 'var(--muted)' }}>WhatsApp number (country code first, digits only)</label>
       <input className="input num" inputMode="numeric" placeholder="919876543210" value={number}
