@@ -1328,7 +1328,7 @@ export default function LeadDrawer({ leadId, stages, onClose }) {
       {forwardTarget && (
         <>
           <div className="scrim" onClick={() => setForwardTarget(null)} />
-          <div style={{ position: 'fixed', inset: 0, zIndex: 42, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div className="modal-wrap" style={{ position: 'fixed', inset: 0, zIndex: 42, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
             <div className="card" role="dialog" aria-label="Forward message" style={{ width: '100%', maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
               <h2 style={{ marginTop: 0 }}>Forward message</h2>
               <div className="wa-forward-preview">

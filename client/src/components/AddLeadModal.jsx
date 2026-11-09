@@ -148,7 +148,7 @@ export default function AddLeadModal({ stages, campaigns, onClose, onCreated, on
   return (
     <>
       <div className="scrim" onClick={onClose} />
-      <div style={{
+      <div className="modal-wrap" style={{
         position: 'fixed', inset: 0, zIndex: 42,
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20
       }}>

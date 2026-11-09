@@ -371,7 +371,7 @@ export default function CreativeCampaignFields({ creative, onSaved }) {
       {open && (
         <>
           <div className="scrim" onClick={() => setOpen(false)} />
-          <div style={{ position: 'fixed', inset: 0, zIndex: 42, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div className="modal-wrap" style={{ position: 'fixed', inset: 0, zIndex: 42, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
             <div className="card" style={{ width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
                 <h2 style={{ margin: 0 }}>{creative.destination_type ? 'Edit campaign setup' : 'Set up for campaign'}</h2>

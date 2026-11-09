@@ -104,7 +104,7 @@ export default function ManageStagesModal({ stages, onClose, onChanged }) {
   return (
     <>
       <div className="scrim" onClick={onClose} />
-      <div style={{ position: 'fixed', inset: 0, zIndex: 42, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div className="modal-wrap" style={{ position: 'fixed', inset: 0, zIndex: 42, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
         <div className="card" style={{ width: '100%', maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <h2 style={{ margin: 0 }}>Manage pipeline stages</h2>

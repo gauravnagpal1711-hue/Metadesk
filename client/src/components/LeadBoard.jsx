@@ -281,7 +281,7 @@ export default function LeadBoard({ stages, leads, unreadFirst = false, onOpenLe
       {pendingDrop && (
         <>
           <div className="scrim" onClick={() => setPendingDrop(null)} />
-          <div style={{ position: 'fixed', inset: 0, zIndex: 42, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div className="modal-wrap" style={{ position: 'fixed', inset: 0, zIndex: 42, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
             <div className="card" style={{ width: '100%', maxWidth: 380 }} onClick={(e) => e.stopPropagation()}>
               <h2 style={{ margin: 0 }}>Moving to {pendingDrop.stageName}</h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 12 }}>

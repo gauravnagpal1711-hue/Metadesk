@@ -180,7 +180,7 @@ export default function CreateCampaignModal({ creatives, initialCreativeId, onCl
   return (
     <>
       <div className="scrim" onClick={onClose} />
-      <div style={{ position: 'fixed', inset: 0, zIndex: 42, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div className="modal-wrap" style={{ position: 'fixed', inset: 0, zIndex: 42, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
         <div className="card" style={{ width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
             <h2 style={{ margin: 0 }}>Campaign details</h2>

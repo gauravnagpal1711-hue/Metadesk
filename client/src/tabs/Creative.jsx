@@ -441,7 +441,7 @@ export default function Creative() {
       {promptModal && (
         <>
           <div className="scrim" onClick={() => !generating && busy !== 'keep' && setPromptModal(null)} />
-          <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div className="modal-wrap" style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
             <div className="card" style={{ width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
                 <h2 style={{ margin: 0 }}>
