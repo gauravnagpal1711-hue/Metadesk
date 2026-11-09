@@ -53,7 +53,9 @@ function Icon({ name, size = 22 }) {
 
 export default function App() {
   const [authed, setAuthed] = useState(null);
-  const [tab, setTab] = useState('leads');
+  // Landing tab is decided once, after the Facebook status loads:
+  // not connected -> Facebook (connect it), connected -> Insights.
+  const [tab, setTab] = useState(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [openLeadId, setOpenLeadId] = useState(null);
@@ -87,14 +89,16 @@ export default function App() {
       api.get('/facebook/status').catch(() => ({ connection: {} })),
       api.get('/whatsapp/status').catch(() => ({ web: {}, cloud: {} }))
     ]);
-    setFbConnected(!!fb.connection?.hasToken);
+    const fbOk = !!fb.connection?.hasToken;
+    setFbConnected(fbOk);
     setWaConnected(wa.web?.status === 'connected' || !!wa.cloud?.connected);
+    setTab((t) => t ?? (fbOk ? 'insights' : 'facebook'));
   }, []);
 
   useEffect(() => {
     if (!authed) return;
     refreshCampaigns().catch(() => {});
-    refreshConnections().catch(() => {});
+    refreshConnections().catch(() => setTab((t) => t ?? 'insights'));
     const t = setInterval(() => refreshConnections().catch(() => {}), 30000);
     return () => clearInterval(t);
   }, [authed, refreshCampaigns, refreshConnections]);
@@ -132,6 +136,7 @@ export default function App() {
 
   if (authed === null) return null;
   if (!authed) return <Login onDone={() => setAuthed(true)} />;
+  if (tab === null) return null; // brief blank while the landing tab is decided
 
   const active = TABS.find((t) => t.id === tab);
   const showMetrics = tab === 'campaigns';
