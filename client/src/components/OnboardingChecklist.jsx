@@ -60,11 +60,26 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConne
       if (isMobile && /^https:\/\/www\.facebook\.com\/pages\/create\/?$/.test(url)) {
         url = 'https://m.facebook.com/pages/create/';
       }
-      const w = isMobile ? window.open(url, '_blank') : window.open(url, 'meta-setup', 'width=780,height=820');
+      // The installed Facebook app claims facebook.com links and opens its home screen.
+      // Force the page to open inside the browser instead, so the person's existing
+      // web login is used and the exact page loads.
+      const ua = navigator.userAgent;
+      if (isMobile && /Android/i.test(ua)) {
+        const u = new URL(url);
+        const pkg = /Firefox/i.test(ua) ? 'org.mozilla.firefox' : /SamsungBrowser/i.test(ua) ? 'com.sec.android.app.sbrowser' : 'com.android.chrome';
+        url = `intent://${u.host}${u.pathname}${u.search}#Intent;scheme=https;package=${pkg};S.browser_fallback_url=${encodeURIComponent(a.url)};end`;
+      } else if (isMobile && /CriOS/i.test(ua)) {
+        url = url.replace(/^https:/, 'googlechromes:');
+      }
+      // intent:// and googlechromes:// are launched by assigning location (window.open
+      // would leave a blank tab behind); a plain https URL opens in a new tab.
+      let w = null;
+      if (/^(intent|googlechromes):/.test(url)) window.location.href = url;
+      else w = isMobile ? window.open(url, '_blank') : window.open(url, 'meta-setup', 'width=780,height=820');
       // Refresh when the popup closes (desktop) or when the user comes back to this tab (phone).
       const done = async () => { await refresh(); setBusyKey(''); };
       const timer = setInterval(() => {
-        if (!w || w.closed) { clearInterval(timer); document.removeEventListener('visibilitychange', onVis); done(); }
+        if (isMobile ? (w && w.closed) : (!w || w.closed)) { clearInterval(timer); document.removeEventListener('visibilitychange', onVis); done(); }
       }, 1000);
       function onVis() {
         if (document.visibilityState === 'visible') { clearInterval(timer); document.removeEventListener('visibilitychange', onVis); done(); }
