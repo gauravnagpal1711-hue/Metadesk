@@ -280,6 +280,7 @@ export async function startWeb(userId, { phoneNumber } = {}) {
   s.starting = true;
   s.error = null;
   s.pairingCode = null;
+  s.pairingRequested = false;
 
   let baileys;
   let QRCode;
@@ -307,12 +308,6 @@ export async function startWeb(userId, { phoneNumber } = {}) {
     s.status = 'pairing';
     sock.ev.on('creds.update', saveCreds);
 
-    // Alternative to scanning a QR — WhatsApp's own "Link with phone number"
-    // flow. Must be requested before the socket finishes registering; the code
-    // is typed into the phone instead of scanning anything.
-    if (phoneNumber && !sock.authState.creds.registered) {
-      s.pairingCode = await sock.requestPairingCode(phoneNumber);
-    }
   } catch (err) {
     s.starting = false;
     s.status = 'error';
@@ -323,8 +318,27 @@ export async function startWeb(userId, { phoneNumber } = {}) {
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
     if (qr) {
-      s.qr = await QRCode.toDataURL(qr);
-      s.status = 'pairing';
+      // Alternative to scanning a QR — WhatsApp's own "Link with phone number" flow.
+      // The code can only be requested once the socket is actually open, which is
+      // exactly when the first QR event fires. (Requesting it straight after
+      // makeWASocket(), before the websocket is up, fails with "Connection Closed".)
+      if (phoneNumber && !sock.authState.creds.registered) {
+        if (!s.pairingCode && !s.pairingRequested) {
+          s.pairingRequested = true;
+          try {
+            s.pairingCode = await sock.requestPairingCode(phoneNumber);
+            s.qr = null;
+            s.error = null;
+          } catch (err) {
+            s.pairingRequested = false;
+            s.error = `Could not get a pairing code: ${err.message}`;
+          }
+        }
+        s.status = 'pairing';
+      } else {
+        s.qr = await QRCode.toDataURL(qr);
+        s.status = 'pairing';
+      }
     }
     if (connection === 'open') {
       s.status = 'connected';

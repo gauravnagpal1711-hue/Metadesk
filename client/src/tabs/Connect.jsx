@@ -150,7 +150,11 @@ export default function Connect({ onConnectionChange }) {
           </div>
         ) : (
           <div style={{ marginTop: 16 }}>
-            {web.status === 'pairing' && web.pairingCode ? (
+            {web.status === 'pairing' && !web.pairingCode && !web.error ? (
+              <div style={{ textAlign: 'center', padding: '18px 0', color: 'var(--muted)' }}>
+                Requesting your pairing code… (a few seconds)
+              </div>
+            ) : web.status === 'pairing' && web.pairingCode ? (
               <>
                 <div style={{
                   fontFamily: 'var(--mono)', fontSize: 28, fontWeight: 700, letterSpacing: 2,
