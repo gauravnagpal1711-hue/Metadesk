@@ -32,8 +32,13 @@ export default function Facebook({ onConnectionChange, onNavigate }) {
       setAdAccountId(s.connection?.adAccountId || '');
       setPageId(s.connection?.pageId || '');
       if (s.connection?.hasToken) {
-        const opts = await api.get('/facebook/accounts').catch(() => null);
-        setOptions(opts);
+        try {
+          setOptions(await api.get('/facebook/accounts'));
+        } catch (e) {
+          // Don't hang on "Loading your accounts…" — show the real reason with empty lists.
+          setOptions({ adAccounts: [], pages: [] });
+          setError(`Could not load your ad accounts/pages: ${e.message}`);
+        }
       }
       onConnectionChange?.();
     } catch (e) {
@@ -209,7 +214,19 @@ export default function Facebook({ onConnectionChange, onNavigate }) {
                   ))}
                 </select>
               </div>
-              <button className="btn primary" onClick={save} disabled={busy === 'save' || !adAccountId || !pageId}>
+              {options.adAccounts.length === 0 && (
+                <div className="notice" style={{ marginBottom: 10 }}>
+                  No ad accounts were found for this Facebook login. Open Meta Ads Manager once so one is
+                  created, or sign in with the Facebook account that owns your ad account.
+                </div>
+              )}
+              {options.pages.length === 0 && (
+                <div className="notice" style={{ marginBottom: 10 }}>
+                  No Facebook Page yet — you can pick your ad account now and choose the Page after you create it.
+                </div>
+              )}
+              {/* Either one is enough to save; the other can be chosen later. */}
+              <button className="btn primary" onClick={save} disabled={busy === 'save' || (!adAccountId && !pageId)}>
                 {busy === 'save' ? 'Saving…' : 'Save & start syncing'}
               </button>
             </>
