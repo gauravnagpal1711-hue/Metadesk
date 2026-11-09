@@ -1470,3 +1470,11 @@ a.wa-btn:hover { background: rgba(0, 168, 132, .2); }
 @media (max-width: 520px) {
   .reminder-stack { bottom: calc(70px + env(safe-area-inset-bottom)); }
 }
+/* show/hide password toggle */
+.pw-wrap { position: relative; }
+.pw-toggle {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 50%; background: transparent; color: var(--muted-2); cursor: pointer;
+}
+.pw-toggle:hover, .pw-toggle[aria-pressed="true"] { color: var(--accent); }
