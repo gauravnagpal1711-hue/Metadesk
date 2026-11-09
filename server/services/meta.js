@@ -556,6 +556,18 @@ export async function resolveWhatsappNumber(userId) {
   } catch {
     /* settings table not ready */
   }
+  // The number linked through the WhatsApp tab (QR / pairing code) wins over the
+  // Page's number: that's the number this app actually receives messages on, so
+  // ads must send people there or their chats would never become leads here.
+  try {
+    const { webStatus } = await import('./whatsappWeb.js');
+    const { loadWaConnection } = await import('./waConnection.js');
+    const live = webStatus(userId);
+    const me = (live?.status === 'connected' && live.me) || (await loadWaConnection(userId))?.webPhone;
+    if (me) return { number: String(me).replace(/\D/g, ''), source: 'whatsapp-web', manual: false };
+  } catch {
+    /* Baileys not running */
+  }
   const conn = await loadConnection(userId).catch(() => null);
   if (conn?.pageId) {
     try {
@@ -570,15 +582,13 @@ export async function resolveWhatsappNumber(userId) {
       /* page has no WA field / no permission — fall through */
     }
   }
+  // WA_DISPLAY_NUMBER is the original owner's number — only they may fall back to
+  // it, never another tenant (their ads would otherwise send leads to the owner).
   if (process.env.WA_DISPLAY_NUMBER) {
-    return { number: String(process.env.WA_DISPLAY_NUMBER).replace(/\D/g, ''), source: 'env', manual: false };
-  }
-  try {
-    const { webStatus } = await import('./whatsappWeb.js');
-    const me = webStatus(userId)?.me;
-    if (me) return { number: String(me).replace(/\D/g, ''), source: 'whatsapp-web', manual: false };
-  } catch {
-    /* Baileys not running */
+    const first = (await q('SELECT id FROM users ORDER BY id LIMIT 1').catch(() => ({ rows: [] }))).rows[0];
+    if (first && first.id === userId) {
+      return { number: String(process.env.WA_DISPLAY_NUMBER).replace(/\D/g, ''), source: 'env', manual: false };
+    }
   }
   return { number: null, source: null, manual: false };
 }
