@@ -23,6 +23,7 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
   const [edits, setEdits] = useState([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [createFor, setCreateFor] = useState(null); // creative id to preselect
+  const [editBrief, setEditBrief] = useState(null); // a brief being edited (e.g. after Meta rejected it)
   const [editing, setEditing] = useState(null); // a campaign row
   const [briefBusy, setBriefBusy] = useState(null); // brief id currently mutating
 
@@ -164,21 +165,26 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
     if (b.status === 'draft') {
       return <button className="btn sm" onClick={() => openDetails(b.creative_id)}>Add campaign details</button>;
     }
+    // Edit opens the same form as "Add campaign details", loaded from this brief.
+    const editBtn = <button className="btn sm" onClick={() => { setError(''); setEditBrief(b); }}>Edit</button>;
     if (b.status === 'ready') {
-      return <button className="btn sm primary" onClick={() => setCampaign(b)}>Build on Meta</button>;
+      return <>{editBtn}{' '}<button className="btn sm primary" onClick={() => setCampaign(b)}>Build on Meta</button></>;
     }
     if (b.status === 'queued') {
       // A live launch shows "Working…" (briefBusy, above). A brief left in
-      // 'queued' with no Meta campaign is stuck — let the user run it.
+      // 'queued' with no Meta campaign is stuck — let the user fix or run it.
       return b.meta_campaign_id
         ? <span className="sub" style={{ color: 'var(--muted)' }}>Building on Meta…</span>
-        : <button className="btn sm primary" onClick={() => setCampaign(b)}>Build on Meta</button>;
+        : <>{editBtn}{' '}<button className="btn sm primary" onClick={() => setCampaign(b)}>Build on Meta</button></>;
     }
     if (b.status === 'info_needed') {
       return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
-          {b.notes && <span className="sub" style={{ color: 'var(--bad, #c0392b)' }}>{b.notes}</span>}
-          <button className="btn sm primary" onClick={() => setCampaign(b)}>Retry on Meta</button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
+          {b.notes && <span className="sub" style={{ color: 'var(--bad, #c0392b)', whiteSpace: 'normal', textAlign: 'right', maxWidth: 420 }}>{b.notes}</span>}
+          <span>
+            {editBtn}{' '}
+            <button className="btn sm primary" onClick={() => setCampaign(b)}>Retry on Meta</button>
+          </span>
         </div>
       );
     }
@@ -330,15 +336,18 @@ export default function Campaigns({ rows, setRows, conn, onSynced }) {
         </div>
       )}
 
-      {createOpen && (
+      {(createOpen || editBrief) && (
         <CreateCampaignModal
           creatives={creatives}
           initialCreativeId={createFor}
-          onClose={() => { setCreateOpen(false); setCreateFor(null); }}
+          brief={editBrief}
+          onClose={() => { setCreateOpen(false); setCreateFor(null); setEditBrief(null); }}
           onSaved={(saved) => {
             replaceBrief(saved);
             setCreateOpen(false);
             setCreateFor(null);
+            setEditBrief(null);
+            setError('');
             setNotice(
               saved.status === 'ready'
                 ? `"${saved.name}" is ready. It's listed below as Paused — press "Build on Meta", then "Start campaign" once it's built.`

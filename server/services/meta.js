@@ -264,9 +264,14 @@ const GENDER_CODE = { female: 2, male: 1 };
 
 /** Turn a stored brief.audience blob into a Meta targeting spec. */
 export function buildTargeting(audience = {}) {
+  // Meta no longer lets audiences that include under-18s use anything but age and
+  // city-or-larger locations — interests or a PIN/radius area are rejected with
+  // subcode 3858683 on targeting_age_min. These ads always use a radius and often
+  // interests, so the floor is 18 (an AI-drafted brief once carried 16).
+  const ageMin = Math.max(18, Number(audience.age_min) || 18);
   const t = {
-    age_min: Number(audience.age_min) || 18,
-    age_max: Number(audience.age_max) || 65
+    age_min: ageMin,
+    age_max: Math.min(65, Math.max(ageMin, Number(audience.age_max) || 65))
   };
   const genders = (audience.genders || []).map((g) => GENDER_CODE[g]).filter(Boolean);
   if (genders.length === 1) t.genders = genders; // omit = all

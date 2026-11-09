@@ -7,6 +7,8 @@ import InterestPicker from './InterestPicker.jsx';
 const BLANK_LOC = { mode: 'nearby', center: null, radius_km: 5, cities: [], who: 'residents' };
 
 const MIN_BUDGET = 100;
+// Meta rejects interests / PIN-radius targeting for audiences that include under-18s.
+const MIN_AGE = 18;
 
 const DEST_LABEL = {
   whatsapp: 'People message you on WhatsApp',
@@ -44,8 +46,8 @@ function fromDefaults(d) {
     startMode: d?.start_at ? 'date' : 'now',
     startAt: d?.start_at ? toDatetimeLocal(d.start_at) : '',
     endAt: d?.end_at ? toDatetimeLocal(d.end_at) : '',
-    ageMin: a.age_min ?? 18,
-    ageMax: a.age_max ?? 65,
+    ageMin: Math.max(MIN_AGE, Number(a.age_min) || MIN_AGE),
+    ageMax: Math.min(65, Math.max(MIN_AGE, Number(a.age_max) || 65)),
     genders: Array.isArray(a.genders) && a.genders.length ? a.genders : ['all'],
     interests: Array.isArray(a.interests) ? a.interests : [],
     optGoal: a.advanced?.optimization_goal || '',
@@ -59,19 +61,28 @@ function fromDefaults(d) {
  * the artwork and pre-fill next time, and the server keeps one brief per creative
  * in step. Claude Code's MCP connector creates the real campaign from the brief.
  */
-export default function CreateCampaignModal({ creatives, initialCreativeId, onClose, onSaved }) {
+export default function CreateCampaignModal({ creatives, initialCreativeId, brief, onClose, onSaved }) {
+  // `brief` = editing an existing campaign brief (e.g. one Meta rejected) instead
+  // of creating details from a creative. The brief itself is what gets launched,
+  // so it is what we load and what we save back.
   const ready = useMemo(
     () => creatives.filter((c) => c.status === 'approved' && c.destination_type && c.destination_value),
     [creatives]
   );
 
-  const first = ready.find((c) => c.id === Number(initialCreativeId)) || ready[0];
+  const first = brief
+    ? ready.find((c) => c.id === Number(brief.creative_id))
+    : ready.find((c) => c.id === Number(initialCreativeId)) || ready[0];
   const [creativeId, setCreativeId] = useState(first?.id || '');
   const chosen = ready.find((c) => c.id === Number(creativeId));
 
-  const seed = fromDefaults(first?.campaign_defaults);
+  const seed = fromDefaults(
+    brief
+      ? { name: brief.name, daily_budget: brief.daily_budget, audience: brief.audience, start_at: brief.start_at, end_at: brief.end_at }
+      : first?.campaign_defaults
+  );
   const [name, setName] = useState(
-    first?.campaign_defaults?.name || first?.label || first?.headline || ''
+    brief ? brief.name : first?.campaign_defaults?.name || first?.label || first?.headline || ''
   );
   const [budget, setBudget] = useState(seed.budget);
   const [loc, setLoc] = useState(seed.loc);
@@ -79,7 +90,8 @@ export default function CreateCampaignModal({ creatives, initialCreativeId, onCl
   const [startAt, setStartAt] = useState(seed.startAt);
   const [endAt, setEndAt] = useState(seed.endAt);
 
-  const [advanced, setAdvanced] = useState(false);
+  // Open Advanced up front when the saved age was too low, so the fix is visible.
+  const [advanced, setAdvanced] = useState(!!brief && Number(brief.audience?.age_min) < MIN_AGE);
   const [ageMin, setAgeMin] = useState(seed.ageMin);
   const [ageMax, setAgeMax] = useState(seed.ageMax);
   const [genders, setGenders] = useState(seed.genders);
@@ -136,9 +148,14 @@ export default function CreateCampaignModal({ creatives, initialCreativeId, onCl
       name: { value: name, label: 'Campaign name' },
       budget: { value: budget, label: `Daily budget (min ₹${MIN_BUDGET})`, validate: (x) => Number(x) >= MIN_BUDGET }
     })) return;
-    if (!chosen) return setError('Pick a creative that is set up for campaigns.');
+    if (!chosen && !brief) return setError('Pick a creative that is set up for campaigns.');
     if (loc.mode === 'nearby' && !loc.center) return setError('Set where your shop is (current location or PIN code).');
     if (loc.mode === 'cities' && loc.cities.length === 0) return setError('Add at least one city.');
+    if (!(Number(ageMin) >= MIN_AGE)) {
+      setAdvanced(true);
+      return setError(`The youngest age Meta allows here is ${MIN_AGE} — it rejects interests and PIN-code areas for under-18 audiences.`);
+    }
+    if (!(Number(ageMax) >= Number(ageMin))) { setAdvanced(true); return setError('“Age to” must be at least “Age from”.'); }
     setBusy(true);
     setError('');
     try {
@@ -167,8 +184,26 @@ export default function CreateCampaignModal({ creatives, initialCreativeId, onCl
         end_at: endAt ? new Date(endAt).toISOString() : null
       };
       // Save the details onto the artwork; the server syncs this creative's brief.
-      const updated = await api.patch(`/creatives/${chosen.id}`, { campaign_defaults });
-      if (updated.brief) onSaved(updated.brief);
+      let saved = null;
+      if (chosen) {
+        const updated = await api.patch(`/creatives/${chosen.id}`, { campaign_defaults });
+        saved = updated.brief || null;
+      }
+      if (brief) {
+        // A brief Meta already rejected (or that is stuck queued) is locked, so the
+        // creative sync above leaves it alone — write the changes to it directly and
+        // put it back to "ready" with the old error cleared.
+        const retry = ['info_needed', 'queued'].includes(brief.status);
+        saved = await api.patch(`/campaign-briefs/${brief.id}`, {
+          name: campaign_defaults.name,
+          daily_budget: campaign_defaults.daily_budget,
+          audience,
+          start_at: campaign_defaults.start_at,
+          end_at: campaign_defaults.end_at,
+          ...(retry ? { status: 'ready', notes: null } : {})
+        });
+      }
+      if (saved) onSaved(saved);
       else onClose();
     } catch (e) {
       setError(e.message);
@@ -183,14 +218,18 @@ export default function CreateCampaignModal({ creatives, initialCreativeId, onCl
       <div className="modal-wrap" style={{ position: 'fixed', inset: 0, zIndex: 42, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
         <div className="card" style={{ width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-            <h2 style={{ margin: 0 }}>Campaign details</h2>
+            <h2 style={{ margin: 0 }}>{brief ? 'Edit campaign' : 'Campaign details'}</h2>
             <button className="close" style={{ marginLeft: 'auto' }} onClick={onClose} aria-label="Close">×</button>
           </div>
 
           {error && <div className="notice bad">{error}</div>}
           {v.message && <div className="notice bad">{v.message}</div>}
 
-          {ready.length === 0 ? (
+          {brief?.status === 'info_needed' && brief.notes && (
+            <div className="notice bad" style={{ fontSize: 12.5 }}>{brief.notes}</div>
+          )}
+
+          {ready.length === 0 && !brief ? (
             <div className="notice">
               No creatives are set up for campaigns yet. In <strong>Advertise your Brand</strong>, approve a creative and choose
               what happens when someone taps the ad.
@@ -199,7 +238,7 @@ export default function CreateCampaignModal({ creatives, initialCreativeId, onCl
             <>
               <div className="field">
                 <label>Which ad picture &amp; text?</label>
-                <select className="select" value={creativeId} onChange={(e) => pickCreative(e.target.value)}>
+                <select className="select" value={creativeId} onChange={(e) => pickCreative(e.target.value)} disabled={!!brief}>
                   {ready.map((c) => <option key={c.id} value={c.id}>{c.label || c.headline || `Creative ${c.id}`}</option>)}
                 </select>
                 {chosen && (
@@ -266,8 +305,11 @@ export default function CreateCampaignModal({ creatives, initialCreativeId, onCl
               {advanced && (
                 <div style={{ display: 'grid', gap: 10, padding: '0 0 4px 10px', borderLeft: '2px solid var(--line-soft)' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                    <div className="field" style={{ margin: 0 }}><label>Age from</label><input className="input" type="number" min={13} max={65} value={ageMin} onChange={(e) => setAgeMin(e.target.value)} /></div>
-                    <div className="field" style={{ margin: 0 }}><label>Age to</label><input className="input" type="number" min={13} max={65} value={ageMax} onChange={(e) => setAgeMax(e.target.value)} /></div>
+                    <div className="field" style={{ margin: 0 }}><label>Age from</label><input className="input" type="number" min={MIN_AGE} max={65} value={ageMin} onChange={(e) => setAgeMin(e.target.value)} /></div>
+                    <div className="field" style={{ margin: 0 }}><label>Age to</label><input className="input" type="number" min={MIN_AGE} max={65} value={ageMax} onChange={(e) => setAgeMax(e.target.value)} /></div>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--muted-2)', marginTop: -4 }}>
+                    Meta requires {MIN_AGE} or older for ads with interests or a PIN-code area.
                   </div>
                   <div className="field" style={{ margin: 0 }}>
                     <label>Gender</label>
@@ -300,7 +342,7 @@ export default function CreateCampaignModal({ creatives, initialCreativeId, onCl
               <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                 <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
                 <button className="btn primary" style={{ marginLeft: 'auto' }} onClick={save} disabled={busy}>
-                  {busy ? 'Saving…' : 'Save details'}
+                  {busy ? 'Saving…' : brief ? 'Save changes' : 'Save details'}
                 </button>
               </div>
             </>
