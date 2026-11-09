@@ -53,14 +53,23 @@ export default function OnboardingChecklist({ onNavigate, onFocusPicker, onConne
     if (!a) return;
     if (a.type === 'meta') {
       setBusyKey(step.key);
-      const w = window.open(a.url, 'meta-setup', 'width=780,height=820');
-      const timer = setInterval(async () => {
-        if (!w || w.closed) {
-          clearInterval(timer);
-          await refresh();
-          setBusyKey('');
-        }
+      const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.matchMedia('(max-width: 820px)').matches;
+      let url = a.url;
+      // On phones www.facebook.com/pages/create is hijacked (Facebook app / mobile
+      // redirect) and lands on the home feed — use the mobile page-creation URL.
+      if (isMobile && /^https:\/\/www\.facebook\.com\/pages\/create\/?$/.test(url)) {
+        url = 'https://m.facebook.com/pages/create/';
+      }
+      const w = isMobile ? window.open(url, '_blank') : window.open(url, 'meta-setup', 'width=780,height=820');
+      // Refresh when the popup closes (desktop) or when the user comes back to this tab (phone).
+      const done = async () => { await refresh(); setBusyKey(''); };
+      const timer = setInterval(() => {
+        if (!w || w.closed) { clearInterval(timer); document.removeEventListener('visibilitychange', onVis); done(); }
       }, 1000);
+      function onVis() {
+        if (document.visibilityState === 'visible') { clearInterval(timer); document.removeEventListener('visibilitychange', onVis); done(); }
+      }
+      if (isMobile) document.addEventListener('visibilitychange', onVis);
       return;
     }
     const NAVIGABLE_TARGETS = new Set(['creative', 'campaigns']);
