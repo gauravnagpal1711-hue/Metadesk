@@ -79,7 +79,17 @@ function PageWhatsAppLink({ defaultNumber, onLinked }) {
       const r = await api.post('/facebook/page-whatsapp', { number, code: withCode ? code : undefined });
       if (r.linked) { setMsg('Linked!'); await onLinked?.(); }
       else if (!withCode) { setSent(true); setMsg('Code requested. Open WhatsApp on that phone and enter the code below.'); }
-      else setErr(r.result?.error_message || 'Meta did not confirm the code. Check it and try again.');
+      else {
+        // Show Meta's real answer (verification_status / error_message / anything else)
+        // instead of a generic line, so a rejected code can actually be diagnosed.
+        const res = r.result || {};
+        const detail = [
+          res.error_message,
+          res.verification_status ? `status: ${res.verification_status}` : null,
+          Object.keys(res).length ? `raw: ${JSON.stringify(res)}` : 'raw: (empty reply)'
+        ].filter(Boolean).join(' · ');
+        setErr(`Meta did not confirm the code. ${detail}`);
+      }
     } catch (e) {
       setErr(e.message);
     } finally {
