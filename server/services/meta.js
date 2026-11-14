@@ -701,12 +701,29 @@ export async function pageWhatsappVerify(userId, { number, code }) {
   if (!conn?.pageId) throw new Error('Choose your Facebook Page first (Facebook tab).');
   const form = { whatsapp_number: String(number || '').replace(/\D/g, '') };
   if (code) form.verification_code = String(code).trim();
-  const result = await graph(`${conn.pageId}/page_whatsapp_number_verification`, {
-    conn,
-    method: 'POST',
-    form,
-    token: conn.pageToken || undefined
-  });
+  let result;
+  try {
+    result = await graph(`${conn.pageId}/page_whatsapp_number_verification`, {
+      conn,
+      method: 'POST',
+      form,
+      token: conn.pageToken || undefined
+    });
+  } catch (err) {
+    // Show which permissions the stored tokens really carry, so a "(#283)
+    // Requires pages_manage_metadata" can be told apart from a stale token.
+    try {
+      const [userDbg, pageDbg] = await Promise.all([
+        graph('debug_token', { token: conn.accessToken, params: { input_token: conn.accessToken } }),
+        conn.pageToken
+          ? graph('debug_token', { token: conn.accessToken, params: { input_token: conn.pageToken } })
+          : Promise.resolve(null)
+      ]);
+      const fmt = (d) => (d?.data?.scopes || []).join(', ') || 'none';
+      err.message += ` [diagnostic — user token scopes: ${fmt(userDbg)}; page token scopes: ${pageDbg ? fmt(pageDbg) : 'no page token'}]`;
+    } catch { /* diagnostic is best-effort */ }
+    throw err;
+  }
   return { result, linked: (await pageLinkedWhatsapp(userId)).number };
 }
 
