@@ -712,16 +712,18 @@ export async function pageWhatsappVerify(userId, { number, code }) {
   } catch (err) {
     // Show which permissions the stored tokens really carry, so a "(#283)
     // Requires pages_manage_metadata" can be told apart from a stale token.
-    try {
-      const [userDbg, pageDbg] = await Promise.all([
-        graph('debug_token', { token: conn.accessToken, params: { input_token: conn.accessToken } }),
-        conn.pageToken
-          ? graph('debug_token', { token: conn.accessToken, params: { input_token: conn.pageToken } })
-          : Promise.resolve(null)
-      ]);
-      const fmt = (d) => (d?.data?.scopes || []).join(', ') || 'none';
-      err.message += ` [diagnostic — user token scopes: ${fmt(userDbg)}; page token scopes: ${pageDbg ? fmt(pageDbg) : 'no page token'}]`;
-    } catch { /* diagnostic is best-effort */ }
+    const settle = (p) => p.then((v) => ({ v }), (e) => ({ e: e.message }));
+    const [perms, userDbg, pageDbg] = await Promise.all([
+      settle(graph('me/permissions', { token: conn.accessToken })),
+      settle(graph('debug_token', { token: conn.accessToken, params: { input_token: conn.accessToken } })),
+      conn.pageToken
+        ? settle(graph('debug_token', { token: conn.accessToken, params: { input_token: conn.pageToken } }))
+        : Promise.resolve({ e: 'no page token saved' })
+    ]);
+    const granted = perms.v ? (perms.v.data || []).filter((p) => p.status === 'granted').map((p) => p.permission).join(', ') || 'none' : `lookup failed: ${perms.e}`;
+    const declined = perms.v ? (perms.v.data || []).filter((p) => p.status !== 'granted').map((p) => `${p.permission}(${p.status})`).join(', ') : '';
+    const scopes = (d) => (d.v ? (d.v.data?.scopes || []).join(', ') || 'none' : `lookup failed: ${d.e}`);
+    err.message += ` [diagnostic — granted: ${granted}${declined ? `; not granted: ${declined}` : ''}; user-token scopes: ${scopes(userDbg)}; page-token scopes: ${scopes(pageDbg)}]`;
     throw err;
   }
   return { result, linked: (await pageLinkedWhatsapp(userId)).number };
