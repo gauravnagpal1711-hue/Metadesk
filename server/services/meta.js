@@ -675,9 +675,16 @@ export async function resolveWhatsappNumber(userId) {
  * ("Your Page is not linked to a WhatsApp account", subcode 2446886) — a number
  * typed or paired inside Ads Desk does not count.
  */
+const PAGE_WA_VERIFIED_KEY = 'page_wa_verified';
+
 export async function pageLinkedWhatsapp(userId) {
   const conn = await loadConnection(userId).catch(() => null);
   if (!conn?.pageId) return { number: null, noPage: true };
+  // Meta's verification edge answers {verification_status: "VERIFIED"}, but the
+  // Page's number fields often stay empty on read-back. A verified link we saved
+  // ourselves (for this same Page) counts, otherwise step 8 never turns green.
+  const verified = await getSetting(userId, PAGE_WA_VERIFIED_KEY, null).catch(() => null);
+  const fallback = verified && String(verified.pageId) === String(conn.pageId) ? String(verified.number) : null;
   try {
     const p = await graph(`${conn.pageId}`, {
       conn,
@@ -685,9 +692,9 @@ export async function pageLinkedWhatsapp(userId) {
       token: conn.pageToken || undefined
     });
     const n = p.connected_whatsapp_number || p.whatsapp_number;
-    return { number: n ? String(n).replace(/\D/g, '') : null };
+    return { number: n ? String(n).replace(/\D/g, '') : fallback };
   } catch (e) {
-    return { number: null, error: e.message };
+    return { number: fallback, error: e.message };
   }
 }
 
@@ -725,6 +732,9 @@ export async function pageWhatsappVerify(userId, { number, code }) {
     const scopes = (d) => (d.v ? (d.v.data?.scopes || []).join(', ') || 'none' : `lookup failed: ${d.e}`);
     err.message += ` [diagnostic — granted: ${granted}${declined ? `; not granted: ${declined}` : ''}; user-token scopes: ${scopes(userDbg)}; page-token scopes: ${scopes(pageDbg)}]`;
     throw err;
+  }
+  if (code && result?.verification_status === 'VERIFIED') {
+    await setSetting(userId, PAGE_WA_VERIFIED_KEY, { pageId: conn.pageId, number: form.whatsapp_number });
   }
   return { result, linked: (await pageLinkedWhatsapp(userId)).number };
 }
