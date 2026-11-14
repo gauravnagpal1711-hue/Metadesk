@@ -272,7 +272,9 @@ facebookRouter.get('/onboarding', async (req, res, next) => {
         'Type the code, then come back here — this turns green once Meta shows the link.'
       ],
       status: pageWa.number ? (pageWaDiffers ? 'warn' : 'done') : 'todo',
-      inline: pageWa.number ? null : 'page_whatsapp',
+      // Always offer the form (also when already linked) so the number can be
+      // changed or re-linked after it was removed on Facebook.
+      inline: 'page_whatsapp',
       defaultNumber: wa.number || null,
       action: null
     });

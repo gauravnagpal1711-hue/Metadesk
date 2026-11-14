@@ -708,6 +708,9 @@ export async function pageWhatsappVerify(userId, { number, code }) {
   if (!conn?.pageId) throw new Error('Choose your Facebook Page first (Facebook tab).');
   const form = { whatsapp_number: String(number || '').replace(/\D/g, '') };
   if (code) form.verification_code = String(code).trim();
+  // Asking for a fresh code means the person is (re)linking: forget the saved
+  // "verified" flag so a number removed on Facebook doesn't keep showing as linked.
+  if (!code) await setSetting(userId, PAGE_WA_VERIFIED_KEY, null).catch(() => {});
   let result;
   try {
     result = await graph(`${conn.pageId}/page_whatsapp_number_verification`, {
