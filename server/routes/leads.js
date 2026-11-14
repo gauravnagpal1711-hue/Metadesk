@@ -393,13 +393,36 @@ leadsRouter.get('/analytics', async (req, res, next) => {
       p2
     );
 
+    // Distinct leads "worked" per day: a remark was added, the lead moved
+    // stage, or an outbound chat message was sent to it.
+    const { rows: workedRows } = await q(
+      `WITH touched AS (
+         SELECT date_trunc('day', a.created_at) AS day, a.lead_id
+         FROM activity a JOIN leads l ON l.id = a.lead_id
+         WHERE a.kind = 'moved'${actWhere('a.created_at')}
+         UNION ALL
+         SELECT date_trunc('day', r.created_at), r.lead_id
+         FROM remarks r JOIN leads l ON l.id = r.lead_id
+         WHERE true${actWhere('r.created_at')}
+         UNION ALL
+         SELECT date_trunc('day', m.created_at), m.lead_id
+         FROM messages m JOIN leads l ON l.id = m.lead_id
+         WHERE m.direction = 'out' AND m.deleted_at IS NULL${actWhere('m.created_at')}
+       )
+       SELECT to_char(day, 'YYYY-MM-DD') AS date, count(DISTINCT lead_id)::int AS count
+       FROM touched GROUP BY day`,
+      p2
+    );
+    const workedByDay = new Map(workedRows.map((r) => [r.date, r.count]));
+
     const dayMap = new Map();
     for (const r of dailyActionRows) {
-      const d = dayMap.get(r.date) || { date: r.date, moves: 0, contacts: 0, messages_sent: 0, tasks_done: 0, tasks_added: 0, remarks: 0, total: 0 };
+      const d = dayMap.get(r.date) || { date: r.date, moves: 0, contacts: 0, messages_sent: 0, tasks_done: 0, tasks_added: 0, remarks: 0, leads_worked: workedByDay.get(r.date) || 0, total: 0 };
       d[r.type] = r.count;
       d.total += r.count;
       dayMap.set(r.date, d);
     }
+    const todayKey = new Date().toISOString().slice(0, 10);
     const daily_actions = [...dayMap.values()];
     const actionsTotal = daily_actions.reduce((a, d) => a + d.total, 0);
     const busiest = daily_actions.reduce((best, d) => (!best || d.total > best.total ? d : best), null);
@@ -428,6 +451,7 @@ leadsRouter.get('/analytics', async (req, res, next) => {
         total: actionsTotal,
         active_days: daily_actions.length,
         per_active_day: daily_actions.length ? actionsTotal / daily_actions.length : 0,
+        leads_worked_today: workedByDay.get(todayKey) || 0,
         busiest_day: busiest ? { date: busiest.date, total: busiest.total } : null
       }
     });

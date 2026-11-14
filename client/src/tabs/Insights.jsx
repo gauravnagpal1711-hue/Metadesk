@@ -192,7 +192,8 @@ function DailyActivity({ data }) {
         <div className="empty-mini">No actions logged in this range yet. Stage moves, logged contacts, sent messages, completed tasks and remarks show up here.</div>
       ) : (
         <>
-          <div className="kpi-row" style={{ gridTemplateColumns: 'repeat(4, minmax(0,1fr))', marginBottom: 14 }}>
+          <div className="kpi-row" style={{ gridTemplateColumns: 'repeat(5, minmax(0,1fr))', marginBottom: 14 }}>
+            <div className="kpi"><div className="k">Leads worked today</div><div className="v">{a.leads_worked_today ?? 0}</div></div>
             <div className="kpi"><div className="k">Actions in range</div><div className="v">{a.total}</div></div>
             <div className="kpi"><div className="k">Active days</div><div className="v">{a.active_days}</div></div>
             <div className="kpi"><div className="k">Avg / active day</div><div className="v">{a.per_active_day ? a.per_active_day.toFixed(1) : '—'}</div></div>
@@ -208,7 +209,7 @@ function DailyActivity({ data }) {
                 <div
                   key={d.date}
                   className="day-bar"
-                  title={`${fmtDay(d.date)} — ${d.total} actions\nmoves ${d.moves} · contacts ${d.contacts} · messages ${d.messages_sent} · tasks done ${d.tasks_done} · notes ${d.remarks + d.tasks_added}`}
+                  title={`${fmtDay(d.date)} — ${d.total} actions\nmoves ${d.moves} · contacts ${d.contacts} · messages ${d.messages_sent} · tasks done ${d.tasks_done} · leads worked ${d.leads_worked}`}
                 >
                   <div className="day-bar-track">
                     <div className="day-bar-fill" style={{ height: `${(d.total / max) * 100}%` }} />
@@ -223,7 +224,7 @@ function DailyActivity({ data }) {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Date</th><th>Moves</th><th>Contacts</th><th>Messages</th><th>Tasks done</th><th>Notes</th><th>Total</th>
+                  <th>Date</th><th>Moves</th><th>Contacts</th><th>Messages</th><th>Tasks done</th><th>Leads worked</th><th>Total</th>
                 </tr>
               </thead>
               <tbody>
@@ -234,7 +235,7 @@ function DailyActivity({ data }) {
                     <td className="num">{d.contacts || '—'}</td>
                     <td className="num">{d.messages_sent || '—'}</td>
                     <td className="num">{d.tasks_done || '—'}</td>
-                    <td className="num">{(d.remarks + d.tasks_added) || '—'}</td>
+                    <td className="num">{d.leads_worked || '—'}</td>
                     <td className="num"><strong>{d.total}</strong></td>
                   </tr>
                 ))}
